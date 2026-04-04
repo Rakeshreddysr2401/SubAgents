@@ -1,4 +1,6 @@
+#main.py
 """
+
 OWP Agent - Production FastAPI Server
 
 This is the production client-facing API server.
@@ -18,28 +20,28 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from src.configs.logging_config import setup_logging, get_logger  # noqa: E402
-
+from src.configs.logging_config import setup_logging, get_logger
 setup_logging(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = get_logger(__name__)
 
-from pathlib import Path  # noqa: E402
+from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, Depends, Query, Request  # noqa: E402
-from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-from fastapi.responses import JSONResponse, HTMLResponse  # noqa: E402
-from fastapi.staticfiles import StaticFiles  # noqa: E402
-from langchain_core.messages import AIMessage  # noqa: E402
+from fastapi import FastAPI, Header, HTTPException, Depends, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from langchain_core.messages import AIMessage
 
-from src.models.schemas import ChatRequest, ChatResponse  # noqa: E402
-from src.agents.supervisor_agent import create_supervisor_graph  # noqa: E402
-from src.configs.memory_config import get_memory  # noqa: E402
-from src.configs.request_context import bearer_token_var  # noqa: E402
-from src.auth import authenticate, CurrentUser  # noqa: E402
+from src.models.schema import ChatRequest,ChatResponse
+from graph import graph
+from src.configs.memory_config import get_memory
+from src.configs.request_context import bearer_token_var
+from src.auth.jwt_auth import authenticate, CurrentUser
+from src.auth.token_service import create_token
 
 # Standalone mode: uses PostgresSaver when POSTGRES_URI is set, else MemorySaver
 # (LangGraph Server provides its own checkpointer, but main.py runs independently)
-graph = create_supervisor_graph(checkpointer=get_memory())
+
 
 # In-memory conversation history keyed by thread_id.
 # Each value is a list of {"role": "user"|"assistant", "content": "..."}
@@ -107,11 +109,11 @@ async def verify_auth(
     Validate the Authorization header using JWT.
     Falls back to DEV_API_KEY in development mode.
     """
-    # If no authorization header, try DEV_API_KEY
+    # If no authorization header, try DEV_TOKEN
     if not authorization:
-        dev_token = os.getenv("DEV_API_KEY")
+        dev_token = os.getenv("DEV_TOKEN")
         if dev_token:
-            logger.debug("Using DEV_API_KEY for authentication")
+            logger.debug("Using DEV_TOKEN for authentication")
             user = authenticate(dev_token)
             if user:
                 return user
@@ -157,7 +159,6 @@ def extract_response(result: dict) -> str:
 async def chat(
     request: ChatRequest,
     thread_id: str = Query(default=None, description="Thread ID for conversation continuity"),
-    lot_number: str = Query(default=None, description="Lot number to identify the user for memory"),
     user: CurrentUser = Depends(verify_auth),
 ):
     """Send a message and get a response."""
@@ -165,7 +166,6 @@ async def chat(
     config = {
         "configurable": {
             "thread_id": tid,
-            "lot_number": lot_number,
             "langgraph_auth_user": {
                 "identity": user.client_id,
                 "client_id": user.client_id,
@@ -202,6 +202,19 @@ async def chat(
         thread_id=tid,
         messages=_conversations[tid],
     )
+
+
+@app.post("/login")
+def login():
+    # TODO: Replace with DB later
+    user = {
+        "id": "123",
+        "email": "test@email.com"
+    }
+
+    token = create_token(user["id"], user["email"])
+
+    return {"access_token": token}
 
 
 # ---------------------------------------------------------------------------

@@ -1,1 +1,11 @@
-{ "$schema": "https://langgra.ph/schema.json", "dependencies": ["."], "graphs": { "agent": "./src/agents/supervisor_agent.py:graph" }, "env": ".env", "auth": { "path": "./src/auth/auth_langgraph.py:auth" }, "http": { "app": "./src/webapp.py:app" } }
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "dependencies": ["."],
+  "graphs": {
+    "agent": "./src/agents/supervisor_agent.py:graph"
+  },
+  "env": ".env",
+  "http": {
+    "app": "./src/webapp.py:app"
+  }
+}

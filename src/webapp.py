@@ -18,7 +18,7 @@ from pathlib import Path
 from langgraph_sdk import get_client
 
 from src.configs.logging_config import get_logger
-from src.models.schemas import ChatRequest, ChatResponse
+from src.models.schema import ChatRequest, ChatResponse
 from src.utils.frame_buffer import store_frame, get_latest_frames, has_frames
 
 logger = get_logger(__name__)
