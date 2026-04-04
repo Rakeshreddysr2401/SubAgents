@@ -1,9 +1,9 @@
 # llm_config.py
 
 from langchain.chat_models import init_chat_model as init_openai_model
+from dotenv import load_dotenv
 
-
-
+load_dotenv()
 
 MAC = "192.168.1.22:11434"  # your Mac Mini IP
 # Provider-Model registry
