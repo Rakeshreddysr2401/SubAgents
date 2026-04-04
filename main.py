@@ -1,172 +1,219 @@
+"""
+OWP Agent - Production FastAPI Server
+
+This is the production client-facing API server.
+Runs separately from LangGraph Studio (which is for development only).
+
+Architecture:
+- FastAPI server for client API (this file) - Port 8000
+- LangGraph Studio for development UI - Port 2024 (langgraph dev)
+
+Run: python main.py
+"""
 import os
-from typing import TypedDict, List, Dict
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+from uuid import uuid4
+
 from dotenv import load_dotenv
 
-from langgraph.graph import StateGraph
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.tools import tool
-
-# =========================
-# ENV SETUP
-# =========================
 load_dotenv()
 
-# =========================
-# MEMORY STORE (in-memory)
-# =========================
-memory_store: Dict[str, List] = {}
+from src.configs.logging_config import setup_logging, get_logger  # noqa: E402
 
-def get_memory(conversation_id: str):
-    return memory_store.get(conversation_id, [])
+setup_logging(level=os.getenv("LOG_LEVEL", "INFO"))
+logger = get_logger(__name__)
 
-def save_memory(conversation_id: str, messages: List):
-    memory_store[conversation_id] = messages
+from pathlib import Path  # noqa: E402
 
-# =========================
-# STATE
-# =========================
-class AgentState(TypedDict):
-    conversation_id: str
-    messages: List
-    user_query: str
+from fastapi import FastAPI, Header, HTTPException, Depends, Query, Request  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.responses import JSONResponse, HTMLResponse  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+from langchain_core.messages import AIMessage  # noqa: E402
 
-# =========================
-# LLM (Gemini)
-# =========================
-llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-pro",
-    temperature=0
+from src.models.schemas import ChatRequest, ChatResponse  # noqa: E402
+from src.agents.supervisor_agent import create_supervisor_graph  # noqa: E402
+from src.configs.memory_config import get_memory  # noqa: E402
+from src.configs.request_context import bearer_token_var  # noqa: E402
+from src.auth import authenticate, CurrentUser  # noqa: E402
+
+# Standalone mode: uses PostgresSaver when POSTGRES_URI is set, else MemorySaver
+# (LangGraph Server provides its own checkpointer, but main.py runs independently)
+graph = create_supervisor_graph(checkpointer=get_memory())
+
+# In-memory conversation history keyed by thread_id.
+# Each value is a list of {"role": "user"|"assistant", "content": "..."}
+_conversations: dict[str, list[dict]] = {}
+
+
+# ---------------------------------------------------------------------------
+# Lifespan
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    logger.info("Lang Robo Starting up...")
+    yield
+    logger.info("Lang Robo Shutting down...")
+
+
+app = FastAPI(title="Lang Robo Agent API", version="0.1.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# =========================
-# TOOLS
-# =========================
+# ---------------------------------------------------------------------------
+# Chat UI (serve static/index.html at root)
+# ---------------------------------------------------------------------------
 
-# Web Tool (Dummy / Replace with Tavily)
-@tool
-def web_search(query: str):
-    """Search the web for information"""
-    return f"[WEB RESULT]: Top results for '{query}'"
-
-# ROS2 Robot Tool (Dummy)
-@tool
-def move_robot(direction: str):
-    """Move robot in a direction (left/right/forward/back)"""
-    return f"[ROBOT]: Moving {direction}"
-
-# =========================
-# AGENTS
-# =========================
-
-# General Agent (normal chat)
-def general_agent(state: AgentState):
-    response = llm.invoke(state["messages"])
-    return {"messages": [response]}
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
-# Web Agent
-llm_web = llm.bind_tools([web_search])
-
-def web_agent(state: AgentState):
-    response = llm_web.invoke(state["messages"])
-    return {"messages": [response]}
+app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
 
-# Robot Agent (force tool)
-llm_robot = llm.bind_tools([move_robot], tool_choice="required")
-
-def robot_agent(state: AgentState):
-    response = llm_robot.invoke(state["messages"])
-    return {"messages": [response]}
+@app.get("/", response_class=HTMLResponse)
+async def chat_ui():
+    """Serve the built-in chat UI."""
+    return (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
 
 
-# =========================
-# ROUTER (MAIN AGENT)
-# =========================
-def router(state: AgentState):
-    query = state["user_query"].lower()
+# ---------------------------------------------------------------------------
+# Global exception handler
+# ---------------------------------------------------------------------------
 
-    if "search" in query or "news" in query:
-        return "web_agent"
-    elif "move" in query or "robot" in query:
-        return "robot_agent"
-    else:
-        return "general_agent"
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
 
 
-# =========================
-# GRAPH
-# =========================
-builder = StateGraph(AgentState)
+# ---------------------------------------------------------------------------
+# Auth Dependency
+# ---------------------------------------------------------------------------
 
-builder.add_node("router", router)
-builder.add_node("general_agent", general_agent)
-builder.add_node("web_agent", web_agent)
-builder.add_node("robot_agent", robot_agent)
+async def verify_auth(
+    authorization: str = Header(None, description="Bearer token (optional in dev)"),
+) -> CurrentUser:
+    """
+    Validate the Authorization header using JWT.
+    Falls back to DEV_API_KEY in development mode.
+    """
+    # If no authorization header, try DEV_API_KEY
+    if not authorization:
+        dev_token = os.getenv("DEV_API_KEY")
+        if dev_token:
+            logger.debug("Using DEV_API_KEY for authentication")
+            user = authenticate(dev_token)
+            if user:
+                return user
+        raise HTTPException(
+            status_code=401,
+            detail="Missing Authorization header and no DEV_API_KEY"
+        )
 
-builder.set_entry_point("router")
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Authorization header must start with 'Bearer '"
+        )
 
-builder.add_conditional_edges(
-    "router",
-    router,
-    {
-        "general_agent": "general_agent",
-        "web_agent": "web_agent",
-        "robot_agent": "robot_agent",
-    }
-)
+    token = authorization.removeprefix("Bearer ").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Token is empty")
 
-builder.set_finish_point("general_agent")
-builder.set_finish_point("web_agent")
-builder.set_finish_point("robot_agent")
+    user = authenticate(token)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-graph = builder.compile()
+    return user
 
-# =========================
-# FASTAPI
-# =========================
-app = FastAPI()
 
-@app.post("/chat")
-async def chat(data: dict):
-    conversation_id = data.get("conversationId")
-    user_query = data.get("query")
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-    if not conversation_id or not user_query:
-        return {"error": "conversationId and query are required"}
+def extract_response(result: dict) -> str:
+    """Return the last AI message with content and no tool_calls."""
+    for msg in reversed(result.get("messages", [])):
+        if isinstance(msg, AIMessage) and msg.content and not msg.tool_calls:
+            return msg.content
+    return ""
 
-    # Load memory
-    messages = get_memory(conversation_id)
 
-    # Add user message
-    messages.append({"role": "user", "content": user_query})
+# ---------------------------------------------------------------------------
+# POST /chat
+# ---------------------------------------------------------------------------
 
-    # Run graph
-    state = {
-        "conversation_id": conversation_id,
-        "messages": messages,
-        "user_query": user_query
+@app.post("/chat", response_model=ChatResponse)
+async def chat(
+    request: ChatRequest,
+    thread_id: str = Query(default=None, description="Thread ID for conversation continuity"),
+    lot_number: str = Query(default=None, description="Lot number to identify the user for memory"),
+    user: CurrentUser = Depends(verify_auth),
+):
+    """Send a message and get a response."""
+    tid = thread_id or str(uuid4())
+    config = {
+        "configurable": {
+            "thread_id": tid,
+            "lot_number": lot_number,
+            "langgraph_auth_user": {
+                "identity": user.client_id,
+                "client_id": user.client_id,
+                "token": user.token,
+            },
+        }
     }
 
-    result = graph.invoke(state)
+    # Ensure conversation list exists for this thread
+    if tid not in _conversations:
+        _conversations[tid] = []
 
-    ai_msg = result["messages"][-1]
+    # Record the user's message
+    _conversations[tid].append({"role": "user", "content": request.query})
+    logger.info("Chat request: thread=%s, user=%s, query=%s", tid, user.client_id, request.query[:80])
 
-    # Append AI response
-    messages.append(ai_msg)
+    # Make the caller's Bearer token available to downstream API calls (e.g. claims API)
+    bearer_token_var.set(user.token)
 
-    # Save memory
-    save_memory(conversation_id, messages)
+    # Always invoke with messages — no interrupt/resume handling needed
+    result = await graph.ainvoke(
+        {"messages": [{"role": "user", "content": request.query}]},
+        config=config,
+    )
 
-    return {
-        "response": ai_msg.content,
-        "conversationId": conversation_id,
-        "messages": messages
-    }
+    response_text = extract_response(result)
+
+    # Record the assistant's response
+    if response_text:
+        _conversations[tid].append({"role": "assistant", "content": response_text})
+
+    return ChatResponse(
+        response=response_text,
+        thread_id=tid,
+        messages=_conversations[tid],
+    )
 
 
-# =========================
-# RUN (optional)
-# =========================
-# uvicorn main:app --reload
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
