@@ -25,8 +25,7 @@ setup_logging(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = get_logger(__name__)
 
 from pathlib import Path
-
-from fastapi import FastAPI, Header, HTTPException, Depends, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Depends, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -38,6 +37,7 @@ from src.configs.memory_config import get_memory
 from src.configs.request_context import bearer_token_var
 from src.auth.jwt_auth import authenticate, CurrentUser
 from src.auth.token_service import create_token
+from src.utils.frame_buffer import store_frame
 
 # Standalone mode: uses PostgresSaver when POSTGRES_URI is set, else MemorySaver
 # (LangGraph Server provides its own checkpointer, but main.py runs independently)
@@ -215,6 +215,24 @@ def login():
     token = create_token(user["id"], user["email"])
 
     return {"access_token": token}
+
+
+@app.websocket("/ws/frames")
+async def video_frame_ws(ws: WebSocket, thread_id: str = Query(default=None)):
+    """Receive base64-encoded JPEG frames from the browser."""
+    await ws.accept()
+    tid = thread_id or "default"
+    logger.info("Video WebSocket connected: thread=%s", tid)
+    try:
+        while True:
+            data = await ws.receive_text()
+            store_frame(tid, data)
+    except WebSocketDisconnect:
+        logger.info("Video WebSocket disconnected: thread=%s", tid)
+    except Exception as e:
+        logger.warning("Video WebSocket error: thread=%s, err=%s", tid, e)
+
+
 
 
 # ---------------------------------------------------------------------------

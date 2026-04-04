@@ -12,8 +12,7 @@ PROVIDER_REGISTRY = {
         "gpt-4o": lambda temperature: init_openai_model("gpt-4o", temperature=temperature),
         "gpt-4-turbo": lambda temperature: init_openai_model("gpt-4-turbo", temperature=temperature),
         "gpt-3.5-turbo": lambda temperature: init_openai_model("gpt-3.5-turbo", temperature=temperature),
-        "gpt-4o-mini": lambda temperature: init_openai_model("gpt-4o-mini", temperature=temperature),
-        "gpt-4o-mini": lambda temperature: init_openai_model("gpt-4o-mini", temperature=temperature),
+        "gpt-4o-mini": lambda temperature: init_openai_model("gpt-4o-mini", temperature=temperature)
     },
 
 }
