@@ -37,7 +37,7 @@ from src.configs.memory_config import get_memory
 from src.configs.request_context import bearer_token_var
 from src.auth.jwt_auth import authenticate, CurrentUser
 from src.auth.token_service import create_token
-from src.utils.frame_buffer import store_frame, get_latest_frames
+from src.utils.frame_buffer import store_frame
 
 # Standalone mode: uses PostgresSaver when POSTGRES_URI is set, else MemorySaver
 # (LangGraph Server provides its own checkpointer, but main.py runs independently)
@@ -185,14 +185,8 @@ async def chat(
     # Make the caller's Bearer token available to downstream API calls (e.g. claims API)
     bearer_token_var.set(user.token)
 
-    # Build graph input — include video frames if the camera is streaming
-    graph_input: dict = {"messages": [{"role": "user", "content": request.query}]}
-    frames = get_latest_frames(tid, count=1)
-    if frames:
-        graph_input["video_frames"] = frames
-        logger.info("Including %d video frame(s) in graph input", len(frames))
 
-    result = await graph.ainvoke(graph_input, config=config)
+    result = await graph.ainvoke({"messages":[{"role":"user","content":request.query}]}, config=config)
 
     response_text = extract_response(result)
 

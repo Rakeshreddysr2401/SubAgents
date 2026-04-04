@@ -8,6 +8,7 @@ Routes:
   GET  /health   -> Health check
   GET  /history/{thread_id} -> Conversation history
 """
+from pyexpat.errors import messages
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -19,7 +20,7 @@ from langgraph_sdk import get_client
 
 from src.configs.logging_config import get_logger
 from src.models.schema import ChatRequest, ChatResponse
-from src.utils.frame_buffer import store_frame, get_latest_frames, has_frames
+from src.utils.frame_buffer import store_frame
 
 logger = get_logger(__name__)
 
@@ -83,21 +84,12 @@ async def chat(
         # Ensure thread exists in LangGraph Server
         await _ensure_thread(client, tid)
 
-        # Build graph input — include video frames if the camera is streaming
-        graph_input: dict = {
-            "messages": [{"role": "user", "content": request.query}],
-        }
-        frames = get_latest_frames(tid, count=1)
-        if frames:
-            graph_input["video_frames"] = frames
-            logger.info("Including %d video frame(s) in graph input", len(frames))
-
-        # Always invoke with messages — no interrupt/resume handling needed
         result = await client.runs.wait(
             thread_id=tid,
             assistant_id="agent",
-            input=graph_input,
+            input={"messages":[{"role": "user", "content": request.query}]},
         )
+
 
         response_text = _extract_response(result)
 

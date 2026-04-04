@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 MAC = "192.168.1.22:11434"  # your Mac Mini IP
+OLLAMA_BASE_URL  = "http://127.0.0.1:11434"  # your  local ollama
 # Provider-Model registry
 PROVIDER_REGISTRY = {
     "openai": {

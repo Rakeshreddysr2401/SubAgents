@@ -1,4 +1,5 @@
-from typing import Annotated, List, Literal, Optional, TypedDict
+from typing import Annotated, List, Literal, Optional
+from typing_extensions import TypedDict
 from langchain_core.messages import BaseMessage
 from langgraph.graph import add_messages
 class AgentState(TypedDict):
