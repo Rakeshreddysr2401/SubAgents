@@ -214,17 +214,19 @@ def login():
     return {"access_token": token}
 
 @app.websocket("/ws/frames")
-async def video_frame_ws(ws: WebSocket, thread_id: str = Query(default=None)):
+async def video_frame_ws(ws: WebSocket):
     """Receive base64-encoded JPEG frames from the browser."""
     await ws.accept()
-    tid = thread_id or "default"
-    logger.info("Video WebSocket connected: thread=%s", tid)
+    # Read thread_id from query string manually (Query() can cause WS issues)
+    tid = ws.query_params.get("thread_id") or "default"
+    logger.info(">>> Video WebSocket CONNECTED: thread=%s", tid)
     try:
         while True:
             data = await ws.receive_text()
             store_frame(tid, data)
+            logger.debug("Stored frame for thread=%s (len=%d)", tid, len(data))
     except WebSocketDisconnect:
-        logger.info("Video WebSocket disconnected: thread=%s", tid)
+        logger.info("Video WebLooSocket disconnected: thread=%s", tid)
     except Exception as e:
         logger.warning("Video WebSocket error: thread=%s, err=%s", tid, e)
 
