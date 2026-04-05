@@ -1,6 +1,7 @@
 # llm_config.py
 
 from langchain.chat_models import init_chat_model as init_openai_model
+from langchain_ollama import ChatOllama
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,16 +20,26 @@ PROVIDER_REGISTRY = {
 }
 
 
-def get_llm(provider: str = "openai", model: str = "gpt-4o-mini", temperature: float = 0):
-    provider_models = PROVIDER_REGISTRY.get(provider)
-    if not provider_models:
-        raise ValueError(f"Unsupported provider: {provider}")
+# def get_llm(provider: str = "openai", model: str = "gpt-4o-mini", temperature: float = 0):
+#     provider_models = PROVIDER_REGISTRY.get(provider)
+#     if not provider_models:
+#         raise ValueError(f"Unsupported provider: {provider}")
+#
+#     model_loader = provider_models.get(model)
+#     if not model_loader:
+#         raise ValueError(f"Unsupported model '{model}' for provider '{provider}'")
+#
+#     return model_loader(temperature)
 
-    model_loader = provider_models.get(model)
-    if not model_loader:
-        raise ValueError(f"Unsupported model '{model}' for provider '{provider}'")
 
-    return model_loader(temperature)
+
+
+def get_llm():
+    return ChatOllama(
+        model="gemma4:latest",   # or gemma4 if available in your ollama
+        base_url="http://localhost:11434",
+        temperature=0,
+    )
 
 llm = get_llm()
 
