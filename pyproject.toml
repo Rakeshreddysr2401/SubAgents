@@ -17,6 +17,15 @@ dependencies = [
     "langgraph-cli[inmem]>=0.4.18",
     "requests>=2.32.0",
     "langchain-ollama>=1.0.1",
+    "numpy>=1.26.0",
+    "pillow>=10.0.0",
+    "opencv-python>=4.9.0",
+]
+
+[project.optional-dependencies]
+clip = [
+    "torch>=2.0.0",
+    "open-clip-torch>=2.24.0",
 ]
 
 

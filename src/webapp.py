@@ -8,8 +8,9 @@ Routes:
   GET  /health   -> Health check
   GET  /history/{thread_id} -> Conversation history
 """
-from pyexpat.errors import messages
 from uuid import uuid4
+
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, HTMLResponse
@@ -21,6 +22,8 @@ from langgraph_sdk import get_client
 from src.configs.logging_config import get_logger
 from src.models.schema import ChatRequest, ChatResponse
 from src.utils.frame_buffer import store_frame
+from src.utils.perception_loop import get_perception_loop
+from src.utils.summarization_pipeline import get_pipeline
 
 logger = get_logger(__name__)
 
@@ -31,6 +34,17 @@ _conversations: dict[str, list[dict]] = {}
 _client = None
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start background services on startup; stop them on shutdown."""
+    pipeline = get_pipeline()
+    pipeline.start()
+    logger.info("Summarization pipeline started")
+    yield
+    pipeline.stop()
+    logger.info("Summarization pipeline stopped")
+
+
 def _get_client():
     """Get LangGraph SDK client pointing to the local LangGraph Server."""
     global _client
@@ -39,7 +53,7 @@ def _get_client():
     return _client
 
 
-app = FastAPI(title="OWP Agent Custom API", version="0.1.0")
+app = FastAPI(title="OWP Agent Custom API", version="0.1.0", lifespan=lifespan)
 
 # NOTE: No CORS middleware here — LangGraph Server handles CORS for all routes.
 
@@ -120,12 +134,20 @@ async def video_frame_ws(ws: WebSocket, thread_id: str = Query(default=None)):
     tid = thread_id or "default"
     logger.info("Video WebSocket connected: thread=%s", tid)
 
+    # Register thread so the summarization pipeline starts tracking it
+    get_pipeline().register_thread(tid)
+
+    perception = get_perception_loop()
+
     try:
         while True:
             data = await ws.receive_text()
             store_frame(tid, data)
+            # Run motion gate synchronously (~1ms); heavy work fires async inside
+            perception.on_frame(tid, data)
     except WebSocketDisconnect:
         logger.info("Video WebSocket disconnected: thread=%s", tid)
+        perception.reset_thread(tid)
     except Exception as e:
         logger.warning("Video WebSocket error: thread=%s, err=%s", tid, e)
 
