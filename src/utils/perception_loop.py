@@ -170,7 +170,7 @@ def _caption_frame_async(thread_id: str, b64_jpeg: str):
                 "images": [b64_jpeg],
                 "stream": False,
             },
-            timeout=30,
+            timeout=30000,
         )
         resp.raise_for_status()
         caption = resp.json().get("response", "").strip()
