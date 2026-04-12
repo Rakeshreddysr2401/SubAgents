@@ -1,17 +1,24 @@
 """Perception loop — motion-gated, event-driven VLM captioning.
 
 Called by the WebSocket handler on every incoming frame.
-Runs motion detection synchronously (cheap, ~1ms).
+Runs motion detection synchronously (cheap, ~1ms on CPU).
 When motion is detected AND the cooldown has elapsed, fires a VLM caption
 in a background thread → result is written to EventLog.
 
 Frames are already stored by webapp.py → frame_buffer. No double-storage here.
 
-Motion detection uses OpenCV frame differencing (absdiff on grayscale).
-No model required — runs on CPU in under 1ms per frame.
+LLaVA constraint: only ONE caption runs at a time (semaphore). This prevents
+the thread pool from filling with queued requests while Ollama is busy.
+The cooldown (90s) is intentionally long — LLaVA takes 30-60s on a laptop,
+so firing it more often than that just causes timeouts and blocks the chat model.
+
+Mac Mini tip: if you have LLaVA on your Mac Mini (192.168.1.22:11434), set
+OLLAMA_VISION_URL=http://192.168.1.22:11434 in your .env to separate caption
+traffic from the supervisor chat model (which stays on localhost:11434).
 """
 
 import base64
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -24,8 +31,17 @@ from src.utils.event_log import get_event_log
 
 logger = get_logger(__name__)
 
-_MOTION_THRESHOLD = 2.5   # mean pixel diff to trigger caption
-_CAPTION_COOLDOWN = 8.0   # seconds between VLM calls per thread (raised to ease laptop load)
+# Optionally route LLaVA to a separate machine (e.g. Mac Mini) so it doesn't
+# block the supervisor's chat model on localhost Ollama.
+_VISION_URL = os.getenv("OLLAMA_VISION_URL", OLLAMA_BASE_URL)
+
+_MOTION_THRESHOLD = 2.5
+
+# How long to wait after a caption before trying the next one.
+# LLaVA takes 30-60s on a laptop — 90s gives it room to finish and keeps
+# Ollama free for the supervisor chat model in between.
+_CAPTION_COOLDOWN = 90.0
+
 _CAPTION_PROMPT = (
     "Describe this scene in 2-3 sentences. Cover: "
     "(1) what people are doing and their appearance (clothing colors, position), "
@@ -34,8 +50,12 @@ _CAPTION_PROMPT = (
     "Be specific and factual. No speculation."
 )
 
-# 2 workers is enough: one active caption at a time + one queued
-_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="perception")
+# Global semaphore: only 1 LLaVA caption in flight at a time.
+# Without this, a 30s LLaVA call + 8s cooldown = thread pool always full.
+_caption_semaphore = threading.Semaphore(1)
+
+# 1 worker is enough — captions are serialised by the semaphore anyway.
+_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="perception")
 
 
 class PerceptionLoop:
@@ -53,7 +73,6 @@ class PerceptionLoop:
             return False
 
         motion = self._detect_motion(thread_id, gray)
-
         if motion:
             self._maybe_caption(thread_id, b64_jpeg)
 
@@ -68,22 +87,30 @@ class PerceptionLoop:
             return False
 
         diff = np.abs(gray.astype(np.int16) - prev.astype(np.int16))
-        score = float(diff.mean())
-        motion = score > _MOTION_THRESHOLD
+        motion = float(diff.mean()) > _MOTION_THRESHOLD
 
         if motion:
-            logger.debug("Motion: thread=%s score=%.2f", thread_id, score)
+            logger.debug("Motion: thread=%s", thread_id)
 
         return motion
 
     def _maybe_caption(self, thread_id: str, b64_jpeg: str):
-        """Submit a VLM caption task if cooldown has elapsed."""
+        """Dispatch a VLM caption only if cooldown elapsed AND Ollama is free."""
         import time
         now = time.time()
+
+        # Check per-thread cooldown
         with self._lock:
-            last = self._last_caption.get(thread_id, 0.0)
-            if now - last < _CAPTION_COOLDOWN:
+            if now - self._last_caption.get(thread_id, 0.0) < _CAPTION_COOLDOWN:
                 return
+
+        # Check global LLaVA slot (non-blocking)
+        if not _caption_semaphore.acquire(blocking=False):
+            logger.debug("LLaVA busy — skipping caption for thread=%s", thread_id)
+            return
+
+        # Got the slot — lock in the timestamp and fire
+        with self._lock:
             self._last_caption[thread_id] = now
 
         _executor.submit(_caption_frame_async, thread_id, b64_jpeg)
@@ -95,33 +122,35 @@ class PerceptionLoop:
 
 
 def _caption_frame_async(thread_id: str, b64_jpeg: str):
-    """Send frame to LLaVA, write caption to EventLog."""
+    """Send frame to LLaVA, write caption to EventLog. Releases semaphore when done."""
     try:
         resp = requests.post(
-            f"{OLLAMA_BASE_URL}/api/generate",
+            f"{_VISION_URL}/api/generate",
             json={
                 "model": "llava",
                 "prompt": _CAPTION_PROMPT,
                 "images": [b64_jpeg],
                 "stream": False,
             },
-            timeout=30,
+            timeout=60,  # LLaVA can take 45s on first call (model loading)
         )
         resp.raise_for_status()
         caption = resp.json().get("response", "").strip()
         if caption:
             get_event_log().log(thread_id, caption, tags=["motion", "vlm"])
-            logger.debug("Caption: thread=%s — %s", thread_id, caption[:80])
+            logger.info("Caption: thread=%s — %s", thread_id, caption[:100])
     except requests.ConnectionError:
-        logger.warning("LLaVA not reachable at %s", OLLAMA_BASE_URL)
+        logger.warning("LLaVA not reachable at %s", _VISION_URL)
     except requests.Timeout:
-        logger.warning("LLaVA timed out for thread=%s", thread_id)
+        logger.warning("LLaVA timed out (60s) for thread=%s — Ollama may be overloaded", thread_id)
     except Exception as e:
         logger.exception("Caption failed for thread=%s: %s", thread_id, e)
+    finally:
+        _caption_semaphore.release()  # always release, even on timeout
 
 
 def _decode_to_gray(b64_jpeg: str) -> np.ndarray | None:
-    """Decode base64 JPEG to a small grayscale numpy array. Returns None on failure."""
+    """Decode base64 JPEG to a small grayscale array. Returns None on failure."""
     try:
         import cv2
         data = base64.b64decode(b64_jpeg)
@@ -129,7 +158,6 @@ def _decode_to_gray(b64_jpeg: str) -> np.ndarray | None:
         frame = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
         if frame is None:
             return None
-        # 160x120 is plenty for motion detection — half the previous size
         return cv2.resize(frame, (160, 120), interpolation=cv2.INTER_AREA)
     except Exception as e:
         logger.warning("Frame decode failed: %s", e)
