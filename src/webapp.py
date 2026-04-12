@@ -12,6 +12,9 @@ from uuid import uuid4
 
 from contextlib import asynccontextmanager
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,6 +26,9 @@ from src.configs.logging_config import get_logger
 from src.models.schema import ChatRequest, ChatResponse
 from src.utils.frame_buffer import store_frame
 from src.utils.perception_loop import get_perception_loop
+
+# Offload blocking perception work off the async event loop
+_frame_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="frame")
 
 logger = get_logger(__name__)
 
@@ -132,12 +138,17 @@ async def video_frame_ws(ws: WebSocket, thread_id: str = Query(default=None)):
 
     perception = get_perception_loop()
 
+    loop = asyncio.get_event_loop()
+
+    def _process_frame(data: str):
+        store_frame(tid, data)
+        perception.on_frame(tid, data)
+
     try:
         while True:
             data = await ws.receive_text()
-            store_frame(tid, data)
-            # Run motion gate synchronously (~1ms); heavy work fires async inside
-            perception.on_frame(tid, data)
+            # Offload to thread — keeps the async event loop free for other requests
+            loop.run_in_executor(_frame_executor, _process_frame, data)
     except WebSocketDisconnect:
         logger.info("Video WebSocket disconnected: thread=%s", tid)
         perception.reset_thread(tid)
