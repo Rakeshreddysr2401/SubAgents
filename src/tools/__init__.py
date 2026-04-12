@@ -1,9 +1,10 @@
-from src.tools.vision_tools import describe_camera_view
-from src.tools.memory_tools import recall_events, visual_detail_query
+from src.tools.vision_tools import look_now
+from src.tools.memory_tools import recall_recent
 
-ALL_TOOLS = [describe_camera_view, recall_events, visual_detail_query]
+# recall_recent: fast text log (no LLaVA call) — always try first
+# look_now:      fresh frame → LLaVA — only when text log can't answer
 
-VIDEO_ANALYSIS_TOOLS = [describe_camera_view, recall_events, visual_detail_query]
+ALL_TOOLS = [recall_recent, look_now]
 
-SUPERVISOR_TOOLS = [recall_events, visual_detail_query]
-
+VIDEO_ANALYSIS_TOOLS = [recall_recent, look_now]
+SUPERVISOR_TOOLS = [recall_recent, look_now]

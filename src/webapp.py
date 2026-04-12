@@ -23,7 +23,6 @@ from src.configs.logging_config import get_logger
 from src.models.schema import ChatRequest, ChatResponse
 from src.utils.frame_buffer import store_frame
 from src.utils.perception_loop import get_perception_loop
-from src.utils.summarization_pipeline import get_pipeline
 
 logger = get_logger(__name__)
 
@@ -36,13 +35,10 @@ _client = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start background services on startup; stop them on shutdown."""
-    pipeline = get_pipeline()
-    pipeline.start()
-    logger.info("Summarization pipeline started")
+    """Startup / shutdown hook."""
+    logger.info("OWP Agent started — 5-minute rolling memory active")
     yield
-    pipeline.stop()
-    logger.info("Summarization pipeline stopped")
+    logger.info("OWP Agent stopped")
 
 
 def _get_client():
@@ -133,9 +129,6 @@ async def video_frame_ws(ws: WebSocket, thread_id: str = Query(default=None)):
     await ws.accept()
     tid = thread_id or "default"
     logger.info("Video WebSocket connected: thread=%s", tid)
-
-    # Register thread so the summarization pipeline starts tracking it
-    get_pipeline().register_thread(tid)
 
     perception = get_perception_loop()
 

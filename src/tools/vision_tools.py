@@ -1,4 +1,4 @@
-"""Vision tools — send camera frames to Ollama llava for analysis."""
+"""Vision tools — real-time camera frame analysis via LLaVA."""
 
 import requests
 from langchain_core.runnables import RunnableConfig
@@ -14,26 +14,33 @@ OLLAMA_VISION_MODEL = "llava"
 
 
 @tool
-def describe_camera_view(query: str, config: RunnableConfig) -> str:
-    """Describe what is currently visible in the user's camera feed.
-    Use this tool when the user asks what you can see, what is in front of
-    them, or any question about their camera/video feed.
+def look_now(query: str, config: RunnableConfig) -> str:
+    """Take a fresh camera frame and answer a specific visual question right now.
+
+    Use this when you need current real-time detail that the text log cannot provide:
+    - "what am I doing right now?"
+    - "what color is my shirt / bag / item?"
+    - "how many people are in the room?"
+    - "describe what you see right now"
+    - "is there anything on the desk?"
+    - any question about specific visual details or the current state of the scene
+
+    Do NOT use this if recall_recent already has the answer in its text log —
+    this tool calls the vision model and is slower.
 
     Args:
-        query: The user's question about what they see (e.g. "what do you see?",
-               "how many cars are there?", "describe the scene").
+        query: Your specific question about what the camera currently sees.
     """
     thread_id = config.get("configurable", {}).get("thread_id", "default")
 
     frames = get_latest_frames(thread_id, count=1)
     if not frames:
         return (
-            "I don't have access to a camera feed right now. "
-            "Please make sure your camera is enabled and streaming."
+            "No camera frame available. "
+            "Make sure the camera is enabled and streaming."
         )
 
-    frame_b64 = frames[-1]
-    logger.info("Vision tool: sending frame to %s/%s", OLLAMA_BASE_URL, OLLAMA_VISION_MODEL)
+    logger.info("look_now: sending frame to LLaVA for query=%s", query[:80])
 
     try:
         resp = requests.post(
@@ -41,23 +48,24 @@ def describe_camera_view(query: str, config: RunnableConfig) -> str:
             json={
                 "model": OLLAMA_VISION_MODEL,
                 "prompt": query,
-                "images": [frame_b64],
+                "images": [frames[-1]],
                 "stream": False,
             },
             timeout=30,
         )
         resp.raise_for_status()
-        description = resp.json().get("response", "").strip()
-        if not description:
-            return "I received the image but could not generate a description."
-        return description
+        answer = resp.json().get("response", "").strip()
+        if not answer:
+            return "Vision model returned no response."
+        return answer
+
     except requests.ConnectionError:
         return (
-            f"Vision service (Ollama) is not reachable at {OLLAMA_BASE_URL}. "
-            "Please ensure Ollama is running."
+            f"Vision service (Ollama/LLaVA) is not reachable at {OLLAMA_BASE_URL}. "
+            "Make sure Ollama is running."
         )
     except requests.Timeout:
-        return "Vision service timed out. The model may still be loading."
+        return "Vision service timed out. LLaVA may still be loading — try again in a moment."
     except Exception as e:
-        logger.exception("Vision tool error: %s", e)
-        return f"Vision analysis failed: {e}"
+        logger.exception("look_now error: %s", e)
+        return f"Visual analysis failed: {e}"
