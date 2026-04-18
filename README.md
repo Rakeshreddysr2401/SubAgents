@@ -1,34 +1,21 @@
-# SubAgents
-1.install uv in system
-2.in terminal, run "uv sync" to install dependencies
-3.in terminal, run "langgraph dev" to start the server
-4.add .evn tool file in root directory, and add the following content:
-```
-
-Then you will get three endoints:
-- 🚀 Custom UI Endpoint: http://127.0.0.1:2024
-![img.png](img.png)
-
-- 🎨 Studio UI: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
-- 📚 API Docs: http://127.0.0.1:2024/docs
-
------------
-
 # SubAgents — Perceptual AI Assistant
 
-A local AI assistant that watches your camera, builds a 5-minute rolling memory of what it sees, and answers questions about the environment in real time.
+A local AI assistant that watches your camera, builds a structured world model
+of what it sees, and answers questions about the environment accurately and efficiently.
 
-Built on **LangGraph**, **Ollama**, and **FastAPI**.
+Built on **LangGraph**, **Ollama**, and **FastAPI**. Runs entirely offline on a laptop.
 
 ---
 
 ## What it does
 
 - **Watches your camera** continuously via WebSocket
-- **Detects motion** cheaply (OpenCV pixel diff — no model required, ~1ms per frame)
-- **Describes what it sees** using LLaVA (local vision model via Ollama), triggered on motion
-- **Remembers the last 5 minutes** of observations as timestamped text descriptions
-- **Answers questions** by reading from memory first (fast), falling back to a live camera frame only when the text log isn't enough
+- **Detects motion** cheaply (OpenCV pixel diff, ~1ms, no model)
+- **Understands the scene** using moondream (fast 1.6B VLM, every 20s on motion)
+- **Maintains a World Model** — structured current state: who's there, what objects, what activity
+- **Remembers 5 minutes** of observations as a timestamped text log
+- **Indexes frames with YOLO** — finds the most relevant historical frame for visual queries
+- **Answers questions** using the most efficient path: world model → text log → live frame
 
 ---
 
@@ -40,13 +27,23 @@ Built on **LangGraph**, **Ollama**, and **FastAPI**.
 |---|---|
 | Python 3.11+ | |
 | [Ollama](https://ollama.ai) | Local model server |
+| `moondream` model | Fast scene understanding (1.6B, ~2-5s) |
 | `gemma4` model | Chat / reasoning model |
-| `llava` model | Vision model for camera analysis |
 
-Pull the required models:
 ```bash
-ollama pull gemma4
-ollama pull llava
+ollama pull moondream   # primary vision model (~1.6GB)
+ollama pull gemma4      # chat model
+```
+
+**Optional — for smart frame search:**
+```bash
+uv add ultralytics      # YOLO object detection (~6MB model auto-downloads)
+```
+
+**Optional — LLaVA for higher accuracy visual queries:**
+```bash
+ollama pull llava       # 7B vision model, slower but more accurate
+# Then set in .env: VISION_MODEL=llava
 ```
 
 ### 2. Install dependencies
@@ -56,90 +53,83 @@ cd SubAgents
 uv sync
 ```
 
-> Do **NOT** install the `[clip]` optional extra (`torch`, `open-clip-torch`). It is disabled and will cause high RAM usage on a laptop.
-
-### 3. Configure
-
-Create a `.env` file in the project root:
+### 3. Configure `.env`
 
 ```env
-# Ollama instance for the chat model (gemma4)
+# Ollama on this machine
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 
-# Optional — route LLaVA to a separate machine so it doesn't compete with gemma4
+# Optional: use a separate machine for vision (avoids competing with chat model)
 # OLLAMA_VISION_URL=http://192.168.1.22:11434
+
+# Optional: switch vision model (default: moondream)
+# VISION_MODEL=llava
+
+# Optional: enable BLIP base captioning for richer frame search
+# ENABLE_BLIP=true
 ```
 
-### 4. Start the server
+### 4. Start
 
 ```bash
 langgraph dev
 ```
 
-You will get three endpoints:
-
 - **Chat UI:** `http://127.0.0.1:2024`
-- **LangGraph Studio:** `https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024`
+- **Studio:** `https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024`
 - **API Docs:** `http://127.0.0.1:2024/docs`
 
 ### 5. Use it
 
-1. Open `http://127.0.0.1:2024` in your browser
-2. Enter your Bearer token in the settings bar
-3. Click the **camera button** to enable your webcam
-4. Start asking questions:
+1. Open the chat UI
+2. Enter your Bearer token
+3. Click the **camera button**
+4. Ask questions:
 
-| Question | What happens internally |
-|---|---|
-| `"what happened in the last 5 minutes?"` | Reads text memory — instant |
-| `"was anyone in the room?"` | Reads text memory — instant |
-| `"what color is my shirt?"` | Checks text memory; falls back to live frame if needed |
-| `"what am I doing right now?"` | Grabs live frame → asks LLaVA (30-60s) |
-| `"describe the current scene"` | Grabs live frame → asks LLaVA (30-60s) |
+| Question | Tool used | Speed |
+|---|---|---|
+| `"who is in the room?"` | `recall_world` | Instant |
+| `"what is on the desk?"` | `recall_world` | Instant |
+| `"what happened in the last 5 minutes?"` | `recall_recent` | Instant |
+| `"how many buttons on his shirt?"` | `recall_world` → `look_now` | 2-5s |
+| `"read the text on that whiteboard"` | `look_now` | 5-30s |
 
 ---
 
 ## Architecture
 
 ```
-Browser (webcam enabled)
-    │
-    │  base64 JPEG frame every 2 seconds  (WebSocket /ws/frames)
+Browser (webcam)
+    │  frame every 2s (WebSocket)
     ▼
-webapp.py  ──────────────────────────────────────────
-    │
-    ├─ frame_buffer.py
-    │     Stores EVERY frame in a 5-min rolling deque.
-    │     ~150 frames × 30KB = ~4MB RAM max.
-    │
-    └─ perception_loop.py
-          Motion detection (numpy diff on 160×120 gray image, ~1ms)
-          If motion AND cooldown elapsed AND LLaVA not busy:
-              → send frame to LLaVA (Ollama) in background thread
-              → write caption to event_log.py
+webapp.py
+    ├── frame_buffer      every frame, 5-min rolling ring buffer
+    └── perception_loop
+          │  motion detected?
+          ├─ YOLO (every 15s, CPU, ~100ms)
+          │    → frame_store (frame + object tags for smart search)
+          │
+          └─ moondream (every 20s, Ollama, 2-5s)
+               Structured prompt → CAPTION / PEOPLE / OBJECTS / ACTIVITY / ENVIRONMENT
+               ├─ event_log    (timestamped text history, 5 min)
+               └─ world_model  (current structured state, always latest)
 
-event_log.py
-    Stores timestamped text descriptions (LLaVA captions) for the last 5 min.
-    "[45s ago] A person in a blue shirt is typing at a laptop..."
-
-─────────────────────────────────────────────────────
-
-User sends a chat message  →  POST /chat
+User asks a question → supervisor agent (gemma4)
     │
-    ▼
-supervisor_agent.py  (gemma4 via Ollama)
-    System prompt: "Try recall_recent first. Only call look_now for real-time detail."
-    │
-    ├─ recall_recent  (memory_tools.py)
-    │     Reads event_log text — sub-millisecond. No LLaVA call.
-    │     Use for: "what happened", "was there X", "what did you see"
-    │
-    └─ look_now  (vision_tools.py)
-          Grabs latest frame from frame_buffer.
-          Sends to LLaVA with user's specific question.
-          Use for: "right now", colors, counts, live detail.
-          Shares semaphore with perception_loop so only 1 LLaVA call at a time.
+    ├─ 1. recall_world   → world_model    (instant, answers most questions)
+    ├─ 2. recall_recent  → event_log      (instant, for history questions)
+    └─ 3. look_now       → frame_store.search() + moondream/LLaVA  (2-30s)
 ```
+
+### How questions get answered
+
+| Question type | Example | Tool | Why |
+|---|---|---|---|
+| Current state | "who is there?" | `recall_world` | World model has structured person/object info |
+| History | "what happened?" | `recall_recent` | Text log has timestamped events |
+| Fine detail | "how many buttons?" | `recall_world` → `look_now` | World model first; frame if needed |
+| Real-time | "what am I doing now?" | `look_now` | User wants freshness |
+| Text reading | "what does sign say?" | `look_now` | Requires pixel-level accuracy |
 
 ---
 
@@ -148,30 +138,30 @@ supervisor_agent.py  (gemma4 via Ollama)
 ```
 SubAgents/
 ├── src/
+│   ├── core/
+│   │   └── world_model.py             # Structured current-state model (People/Objects/Activity)
 │   ├── agents/
-│   │   ├── supervisor_agent.py        # Main LangGraph ReAct agent
-│   │   └── video_analysis_agent.py    # Alternate graph (same tools)
+│   │   └── supervisor_agent.py        # LangGraph ReAct agent (gemma4 + 3 tools)
 │   ├── tools/
-│   │   ├── vision_tools.py            # look_now — live frame → LLaVA
-│   │   └── memory_tools.py            # recall_recent — text log (fast)
+│   │   ├── world_tools.py             # recall_world  — reads world_model (instant)
+│   │   ├── memory_tools.py            # recall_recent — reads event_log  (instant)
+│   │   └── vision_tools.py            # look_now      — live frame + VLM (2-30s)
 │   ├── utils/
-│   │   ├── frame_buffer.py            # 5-min rolling raw frame store
-│   │   ├── event_log.py               # 5-min rolling text description store
-│   │   ├── perception_loop.py         # Motion gate + LLaVA background captioning
-│   │   ├── frame_store.py             # No-op delegate to frame_buffer (CLIP removed)
-│   │   ├── summarization_pipeline.py  # Disabled stub (was 6-level LLM hierarchy)
-│   │   └── memory_store.py            # Disabled stub (was hierarchical memory tree)
-│   ├── configs/
-│   ├── models/
-│   ├── states/
-│   ├── auth/
+│   │   ├── frame_buffer.py            # Raw frame ring buffer (every frame, 5 min)
+│   │   ├── event_log.py               # Timestamped text observation log (5 min)
+│   │   ├── frame_store.py             # YOLO-tagged motion frames + search()
+│   │   ├── perception_loop.py         # Motion gate → YOLO + moondream paths
+│   │   ├── yolo_detector.py           # YOLOv8n lazy loader (optional)
+│   │   ├── blip_captioner.py          # BLIP lazy loader (optional, ENABLE_BLIP=true)
+│   │   ├── summarization_pipeline.py  # Disabled stub
+│   │   └── memory_store.py            # Disabled stub
 │   ├── llm_config.py                  # LLM setup (gemma4 via Ollama)
-│   └── webapp.py                      # FastAPI server + WebSocket handler
+│   └── webapp.py                      # FastAPI + WebSocket handler
 ├── static/
 │   └── index.html                     # Self-contained chat UI
-├── langgraph.json                     # LangGraph graph config
+├── langgraph.json
 ├── pyproject.toml
-└── .env                               # Local config (not committed)
+└── .env
 ```
 
 ---
@@ -180,45 +170,67 @@ SubAgents/
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/` | Chat UI (HTML) |
+| `GET` | `/` | Chat UI |
 | `POST` | `/chat?thread_id=<id>` | Send message, receive AI response |
-| `WS` | `/ws/frames?thread_id=<id>` | Stream camera frames from browser |
+| `WS` | `/ws/frames?thread_id=<id>` | Stream camera frames |
 | `GET` | `/health` | Health check |
-| `GET` | `/history/{thread_id}` | Conversation history for a thread |
+| `GET` | `/history/{thread_id}` | Conversation history |
 
 ---
 
-## Configuration Reference
+## Configuration
 
 ### `.env` variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Ollama for gemma4 (chat model) |
-| `OLLAMA_VISION_URL` | same as above | Ollama for LLaVA (vision). Set to a separate machine to eliminate contention. |
+| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Ollama for gemma4 (chat) |
+| `OLLAMA_VISION_URL` | same as above | Ollama for vision model — set to Mac Mini to avoid contention |
+| `VISION_MODEL` | `moondream` | Vision model name (`moondream`, `llava`, `phi3.5-vision`) |
+| `ENABLE_BLIP` | `false` | Enable BLIP base captioning for richer frame search |
 
-### Tuning parameters (`src/utils/perception_loop.py`)
+### Tuning (`src/utils/perception_loop.py`)
 
-| Parameter | Default | Description |
+| Constant | Default | Description |
 |---|---|---|
-| `_CAPTION_COOLDOWN` | `90s` | Minimum seconds between LLaVA caption attempts. Raise if Ollama is still slow. |
-| `_MOTION_THRESHOLD` | `2.5` | Mean pixel diff to classify as motion. Lower = more sensitive. |
+| `_CAPTION_COOLDOWN` | `20s` | moondream caption interval (was 90s with LLaVA) |
+| `_YOLO_COOLDOWN` | `15s` | YOLO detection interval |
+| `_MOTION_THRESHOLD` | `2.5` | Pixel diff sensitivity (lower = more sensitive) |
+| `_CAPTION_MODEL` | `moondream` | Override with `VISION_MODEL` env var |
 
 ---
 
 ## Performance Notes
 
-This system is designed to run entirely on a laptop with a single Ollama instance.
+| Component | RAM | Inference | Notes |
+|---|---|---|---|
+| moondream (Ollama) | ~1.5GB | 2-5s | Primary captioner, every 20s |
+| gemma4 (Ollama) | ~4GB | 3-10s | Chat reasoning |
+| YOLOv8n | ~50MB | ~100ms | Optional, CPU-only |
+| BLIP base | ~900MB | ~2s | Optional, `ENABLE_BLIP=true` |
+| LLaVA (optional) | ~4GB | 30-60s | Use via `VISION_MODEL=llava` for max accuracy |
 
-**What was removed from the original design:**
-- CLIP semantic search (PyTorch + open_clip — 1-2GB RAM, disabled)
-- 6-level summarization hierarchy (5min→10min→30min→1hr→12hr→daily — background LLM calls, disabled)
+**Key laptop optimisations:**
+- moondream replaces LLaVA for background captioning (10× faster → denser memory)
+- YOLO and moondream run in separate executors (YOLO never waits for Ollama)
+- Semaphore ensures only 1 Ollama vision call at a time
+- Frame processing offloaded from async event loop to thread pool
+- World model answers most questions instantly without any model call
 
-**Key laptop optimizations:**
-- 1 LLaVA call at a time (global semaphore — no flooding)
-- 90s cooldown so LLaVA finishes before the next attempt
-- Motion detection on 160×120 image (not full resolution)
-- Frame processing offloaded to a thread (async event loop never blocked)
+---
 
-**Best setup for performance:** Run LLaVA on a Mac Mini or second machine and set `OLLAMA_VISION_URL`. This way `gemma4` and `llava` never share the same Ollama instance.
+## Future Roadmap
 
+```
+Now      MacBook POC    moondream + world model + LangGraph
+         ↓
+Next     Add Mac Mini   OLLAMA_VISION_URL → separate machine, no contention
+         ↓
+Later    Edge devices   Pi5 (sensor node) + Jetson (perception) + Mac Mini (reasoning)
+         ↓
+Future   ROS2           Each node becomes a ROS node, transport swaps to DDS
+                        cmd_vel, robot arms, spatial navigation
+```
+
+The backend interface pattern (`VLMBackend`, `DetectorBackend`) is designed so
+switching from Ollama to llama.cpp (for Pi5/Jetson) requires only a config change.

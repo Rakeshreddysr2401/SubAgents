@@ -150,6 +150,7 @@ async def video_frame_ws(ws: WebSocket, thread_id: str = Query(default=None)):
             # Offload to thread — keeps the async event loop free for other requests
             loop.run_in_executor(_frame_executor, _process_frame, data)
     except WebSocketDisconnect:
+
         logger.info("Video WebSocket disconnected: thread=%s", tid)
         perception.reset_thread(tid)
     except Exception as e:

@@ -23,6 +23,23 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# YOLO object detection — enables smart frame search in look_now
+# Run: uv add ultralytics
+# Downloads yolov8n.pt (~6MB) on first use. Fast on CPU (~50-200ms/frame).
+perception = [
+    "ultralytics>=8.0.0",
+]
+
+# BLIP base captioning — optional extra signal for frame search
+# Requires ENABLE_BLIP=true in .env to activate after install.
+# Run: uv add transformers torch
+# Downloads blip-image-captioning-base (~900MB) on first use.
+blip = [
+    "transformers>=4.30.0",
+    "torch>=2.0.0",
+]
+
+# CLIP semantic search — disabled, do not install
 clip = [
     "torch>=2.0.0",
     "open-clip-torch>=2.24.0",

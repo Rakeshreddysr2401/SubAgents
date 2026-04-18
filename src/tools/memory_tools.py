@@ -1,16 +1,19 @@
 """Memory query tool — text log of observations from the last 5 minutes.
 
-recall_recent reads directly from the EventLog (in-memory, sub-millisecond).
-No LLaVA call, no camera access. Fast.
+recall_recent reads the EventLog (moondream captions) and the YOLO-detected
+objects from frame_store — both are in-memory reads, sub-millisecond.
 
-Use this first. Only call look_now if this log doesn't answer the question.
+Use this before look_now. Only escalate to look_now if this log does not
+have enough visual detail for the question.
 """
 
+import time
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 from src.configs.logging_config import get_logger
 from src.utils.event_log import get_event_log
+from src.utils.frame_store import get_frame_store
 
 logger = get_logger(__name__)
 
@@ -21,38 +24,62 @@ _WINDOW_SECONDS = 300  # 5 minutes
 def recall_recent(query: str, config: RunnableConfig) -> str:
     """Read the text log of everything observed in the last 5 minutes.
 
-    The log contains LLaVA captions captured whenever motion was detected —
-    each entry describes people, clothing colors, objects, actions, and the setting.
+    Returns:
+    - YOLO-detected objects seen across all motion frames in the window
+    - Timestamped moondream captions (who was present, what they did, objects)
 
     Use this for:
     - "what happened in the last 5 minutes?"
     - "was there a person in the room?"
     - "what was I doing earlier?"
-    - "did you see anyone?"
+    - "did anyone enter or leave?"
     - any question about recent activity or past observations
 
     This is the FAST path — no camera call, reads text only.
-    If the answer isn't in this log, use look_now to examine a live frame.
+    If the log lacks the visual detail needed, use look_now.
 
     Args:
         query: The user's question about recent activity.
     """
-    thread_id = config.get("configurable", {}).get("thread_id", "default")
-    event_log = get_event_log()
+    thread_id   = config.get("configurable", {}).get("thread_id", "default")
+    event_log   = get_event_log()
+    frame_store = get_frame_store()
+
+    now    = time.time()
+    cutoff = now - _WINDOW_SECONDS
 
     events = event_log.get_recent_events(thread_id, seconds=_WINDOW_SECONDS)
-    count = len(events)
+    frames = frame_store.get_in_range(thread_id, cutoff, now)
 
-    logger.info("recall_recent: thread=%s events=%d", thread_id, count)
+    logger.info(
+        "recall_recent: thread=%s events=%d yolo_frames=%d",
+        thread_id, len(events), len(frames),
+    )
 
-    if count == 0:
+    if not events and not frames:
         return (
             "No observations in the last 5 minutes. "
             "Either no motion was detected or the camera is not connected."
         )
 
-    text = event_log.format_for_llm(events)
-    return (
-        f"Observations from the last 5 minutes ({count} captured):\n\n"
-        f"{text}"
-    )
+    parts: list[str] = []
+
+    # YOLO objects seen across all motion frames in the window
+    yolo_objects: list[str] = []
+    for f in frames:
+        for tag in f.yolo_tags:
+            if tag not in yolo_objects:
+                yolo_objects.append(tag)
+
+    if yolo_objects:
+        parts.append(
+            f"Objects detected (YOLO, last 5 min): {', '.join(yolo_objects)}"
+        )
+
+    if events:
+        caption_text = event_log.format_for_llm(events)
+        parts.append(
+            f"Observations ({len(events)} captured, last 5 min):\n{caption_text}"
+        )
+
+    return "\n\n".join(parts)
