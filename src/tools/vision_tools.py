@@ -1,4 +1,4 @@
-"""Vision tools — real-time camera frame analysis via LLaVA."""
+"""Vision tools — real-time camera frame analysis via llama.cpp (Gemma multimodal)."""
 
 import os
 import requests
@@ -6,17 +6,42 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 from src.utils.frame_buffer import get_latest_frames
-from src.llm_config import OLLAMA_BASE_URL
+from src.llm_config import VISION_BASE_URL, VISION_MODEL_NAME
 from src.configs.logging_config import get_logger
-
-# Import the semaphore from perception_loop so look_now and background captions
-# never call LLaVA at the same time (they share one Ollama instance).
 from src.utils.perception_loop import _caption_semaphore
 
 logger = get_logger(__name__)
 
-OLLAMA_VISION_MODEL = "llava"
-_VISION_URL = os.getenv("OLLAMA_VISION_URL", OLLAMA_BASE_URL)
+# Allow overriding vision endpoint independently (e.g. separate GPU machine).
+_VISION_URL = os.getenv("VISION_BASE_URL", VISION_BASE_URL)
+
+
+def _call_vision(query: str, b64_jpeg: str, timeout: int = 120) -> str:
+    """POST a base64 JPEG + query to the llama.cpp OpenAI-compatible endpoint."""
+    resp = requests.post(
+        f"{_VISION_URL}/chat/completions",
+        headers={"Authorization": "Bearer not-needed", "Content-Type": "application/json"},
+        json={
+            "model": VISION_MODEL_NAME,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": query},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{b64_jpeg}"},
+                        },
+                    ],
+                }
+            ],
+            "max_tokens": 300,
+            "stream": False,
+        },
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"].strip()
 
 
 @tool
@@ -46,37 +71,23 @@ def look_now(query: str, config: RunnableConfig) -> str:
             "Make sure the camera is enabled and streaming."
         )
 
-    logger.info("look_now: waiting for LLaVA slot (query=%s)", query[:60])
+    logger.info("look_now: waiting for vision slot (query=%s)", query[:60])
 
-    # Wait for the LLaVA semaphore — user requests always go through,
-    # but we wait if a background caption is currently running.
+    # Block until background caption finishes — user queries always go through.
     _caption_semaphore.acquire()
     try:
-        logger.info("look_now: sending frame to LLaVA")
-        resp = requests.post(
-            f"{_VISION_URL}/api/generate",
-            json={
-                "model": OLLAMA_VISION_MODEL,
-                "prompt": query,
-                "images": [frames[-1]],
-                "stream": False,
-            },
-            timeout=120,
-        )
-        resp.raise_for_status()
-        answer = resp.json().get("response", "").strip()
-        if not answer:
-            return "Vision model returned no response."
-        return answer
+        logger.info("look_now: sending frame to Gemma vision")
+        answer = _call_vision(query, frames[-1], timeout=120)
+        return answer or "Vision model returned no response."
 
     except requests.ConnectionError:
         return (
-            f"Vision service (Ollama/LLaVA) is not reachable at {_VISION_URL}. "
-            "Make sure Ollama is running with: ollama serve"
+            f"Vision service (llama.cpp) is not reachable at {_VISION_URL}. "
+            "Make sure llama-server is running: llama-server --mmproj ..."
         )
     except requests.Timeout:
         return (
-            "Vision service timed out (60s). LLaVA may still be loading. "
+            "Vision service timed out. Gemma may still be loading. "
             "Try again in a moment."
         )
     except Exception as e:

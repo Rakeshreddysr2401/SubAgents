@@ -1,20 +1,20 @@
-"""Perception loop — motion-gated, event-driven VLM captioning.
+"""Perception loop — motion-gated, event-driven VLM captioning via llama.cpp.
 
 Called by the WebSocket handler on every incoming frame.
-Runs motion detection synchronously (cheap, ~1ms on CPU).
-When motion is detected AND the cooldown has elapsed, fires a VLM caption
+Runs motion detection synchronously (~1ms on CPU).
+When motion is detected AND the cooldown has elapsed, fires a Gemma vision caption
 in a background thread → result is written to EventLog.
 
 Frames are already stored by webapp.py → frame_buffer. No double-storage here.
 
-LLaVA constraint: only ONE caption runs at a time (semaphore). This prevents
-the thread pool from filling with queued requests while Ollama is busy.
-The cooldown (90s) is intentionally long — LLaVA takes 30-60s on a laptop,
-so firing it more often than that just causes timeouts and blocks the chat model.
+llama.cpp constraint: only ONE caption runs at a time (semaphore). This prevents
+the thread pool from filling with queued requests while the model is busy.
+The cooldown (90s) is intentionally long — multimodal inference takes 20-60s on a
+laptop, so firing it more often just causes timeouts and blocks the chat model.
 
-Mac Mini tip: if you have LLaVA on your Mac Mini (192.168.1.22:11434), set
-OLLAMA_VISION_URL=http://192.168.1.22:11434 in your .env to separate caption
-traffic from the supervisor chat model (which stays on localhost:11434).
+Separate machine tip: if you have a second machine with a GPU, set
+VISION_BASE_URL=http://192.168.1.22:8080/v1 in your .env to route caption
+traffic away from the supervisor chat model.
 """
 
 import base64
@@ -26,20 +26,18 @@ import numpy as np
 import requests
 
 from src.configs.logging_config import get_logger
-from src.llm_config import OLLAMA_BASE_URL
+from src.llm_config import VISION_BASE_URL, VISION_MODEL_NAME
 from src.utils.event_log import get_event_log
 
 logger = get_logger(__name__)
 
-# Optionally route LLaVA to a separate machine (e.g. Mac Mini) so it doesn't
-# block the supervisor's chat model on localhost Ollama.
-_VISION_URL = os.getenv("OLLAMA_VISION_URL", OLLAMA_BASE_URL)
+# Allow routing vision to a separate llama.cpp instance.
+_VISION_URL = os.getenv("VISION_BASE_URL", VISION_BASE_URL)
 
 _MOTION_THRESHOLD = 2.5
 
 # How long to wait after a caption before trying the next one.
-# LLaVA takes 30-60s on a laptop — 90s gives it room to finish and keeps
-# Ollama free for the supervisor chat model in between.
+# Gemma multimodal takes 20-60s on a laptop — 90s keeps the server free for chat.
 _CAPTION_COOLDOWN = 90.0
 
 _CAPTION_PROMPT = (
@@ -50,8 +48,7 @@ _CAPTION_PROMPT = (
     "Be specific and factual. No speculation."
 )
 
-# Global semaphore: only 1 LLaVA caption in flight at a time.
-# Without this, a 30s LLaVA call + 8s cooldown = thread pool always full.
+# Global semaphore: only 1 vision caption in flight at a time.
 _caption_semaphore = threading.Semaphore(1)
 
 # 1 worker is enough — captions are serialised by the semaphore anyway.
@@ -95,21 +92,18 @@ class PerceptionLoop:
         return motion
 
     def _maybe_caption(self, thread_id: str, b64_jpeg: str):
-        """Dispatch a VLM caption only if cooldown elapsed AND Ollama is free."""
+        """Dispatch a vision caption only if cooldown elapsed AND the model is free."""
         import time
         now = time.time()
 
-        # Check per-thread cooldown
         with self._lock:
             if now - self._last_caption.get(thread_id, 0.0) < _CAPTION_COOLDOWN:
                 return
 
-        # Check global LLaVA slot (non-blocking)
         if not _caption_semaphore.acquire(blocking=False):
-            logger.debug("LLaVA busy — skipping caption for thread=%s", thread_id)
+            logger.debug("Vision model busy — skipping caption for thread=%s", thread_id)
             return
 
-        # Got the slot — lock in the timestamp and fire
         with self._lock:
             self._last_caption[thread_id] = now
 
@@ -122,31 +116,43 @@ class PerceptionLoop:
 
 
 def _caption_frame_async(thread_id: str, b64_jpeg: str):
-    """Send frame to LLaVA, write caption to EventLog. Releases semaphore when done."""
+    """Send frame to Gemma vision via llama.cpp, write caption to EventLog."""
     try:
         resp = requests.post(
-            f"{_VISION_URL}/api/generate",
+            f"{_VISION_URL}/chat/completions",
+            headers={"Authorization": "Bearer not-needed", "Content-Type": "application/json"},
             json={
-                "model": "llava",
-                "prompt": _CAPTION_PROMPT,
-                "images": [b64_jpeg],
+                "model": VISION_MODEL_NAME,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": _CAPTION_PROMPT},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/jpeg;base64,{b64_jpeg}"},
+                            },
+                        ],
+                    }
+                ],
+                "max_tokens": 200,
                 "stream": False,
             },
-            timeout=60,  # LLaVA can take 45s on first call (model loading)
+            timeout=60,
         )
         resp.raise_for_status()
-        caption = resp.json().get("response", "").strip()
+        caption = resp.json()["choices"][0]["message"]["content"].strip()
         if caption:
             get_event_log().log(thread_id, caption, tags=["motion", "vlm"])
             logger.info("Caption: thread=%s — %s", thread_id, caption[:100])
     except requests.ConnectionError:
-        logger.warning("LLaVA not reachable at %s", _VISION_URL)
+        logger.warning("Vision model not reachable at %s", _VISION_URL)
     except requests.Timeout:
-        logger.warning("LLaVA timed out (60s) for thread=%s — Ollama may be overloaded", thread_id)
+        logger.warning("Vision model timed out (60s) for thread=%s", thread_id)
     except Exception as e:
         logger.exception("Caption failed for thread=%s: %s", thread_id, e)
     finally:
-        _caption_semaphore.release()  # always release, even on timeout
+        _caption_semaphore.release()
 
 
 def _decode_to_gray(b64_jpeg: str) -> np.ndarray | None:
