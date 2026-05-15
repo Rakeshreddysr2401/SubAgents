@@ -116,8 +116,12 @@ async def chat(
 
             if full_response:
                 _conversations[tid].append({"role": "assistant", "content": full_response})
-                # Yield the content as a single chunk for the frontend stream reader
-                yield f"data: {full_response}\n\n"
+                # Yield each line with a 'data: ' prefix. 
+                # SSE standard: consecutive data: lines are joined with \n by the client.
+                event_data = ""
+                for line in full_response.split('\n'):
+                    event_data += f"data: {line}\n"
+                yield event_data + "\n"
                 
                 if request.always_speak:
                     # Speak in background to not block the connection close
@@ -207,16 +211,23 @@ async def _ensure_thread(client, tid: str):
 
 
 def _extract_response(result) -> str:
-    """Extract the last AI message with content."""
+    """Extract and combine all AI message content from the result."""
     if not result:
         logger.warning("No result from graph invocation")
         return ""
 
     messages = result.get("messages", []) if isinstance(result, dict) else []
-    for msg in reversed(messages):
-        # Check if it's an AI message with content
-        role = ""
+    ai_contents = []
+    
+    # We want to capture the NEW messages generated in this specific run.
+    # Usually, the result contains the full history, so we look for the last 
+    # sequence of AI messages that weren't there before.
+    # However, for simplicity and to match the 'always_speak' logic,
+    # we'll collect all AI content that isn't just a tool call placeholder.
+    
+    for msg in messages:
         content = ""
+        role = ""
         
         if isinstance(msg, dict):
             role = msg.get("type", "")
@@ -225,12 +236,29 @@ def _extract_response(result) -> str:
             role = getattr(msg, "type", "")
             content = getattr(msg, "content", "")
 
-        if role == "ai" and content:
-            # We found the response text
-            return content
+        # Only accumulate AI content from the CURRENT turn.
+        # Since we append the User message in webapp.py before the run,
+        # we can look for AI messages appearing AFTER the last User message.
+        pass # Placeholder for logic below
 
-    logger.warning("No AI response content found in result")
-    return ""
+    # REFINED LOGIC: Find the last User message and take everything AI after it.
+    last_user_idx = -1
+    for i, msg in enumerate(messages):
+        role = msg.get("type", "") if isinstance(msg, dict) else getattr(msg, "type", "")
+        if role == "human" or role == "user":
+            last_user_idx = i
+            
+    for i in range(last_user_idx + 1, len(messages)):
+        msg = messages[i]
+        role = msg.get("type", "") if isinstance(msg, dict) else getattr(msg, "type", "")
+        content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
+        if role == "ai" and content:
+            ai_contents.append(content)
+
+    final_text = "\n\n".join(ai_contents).strip()
+    if not final_text:
+        logger.warning("No AI response content found in result")
+    return final_text
 
 
 # Global exception handler

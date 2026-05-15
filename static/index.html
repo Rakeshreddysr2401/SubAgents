@@ -1148,6 +1148,7 @@
           const chunk = decoder.decode(value);
           const lines = chunk.split("\n");
           
+          let chunkText = "";
           for (const line of lines) {
             if (line.startsWith("data: ")) {
               const data = line.slice(6);
@@ -1167,10 +1168,16 @@
                 throw new Error(data.slice(8));
               }
               
-              fullText += data;
-              mdDiv.innerHTML = renderMarkdown(fullText);
-              scrollToBottom();
+              // If we have multiple data lines in one event, they should be joined by \n
+              if (chunkText !== "") chunkText += "\n";
+              chunkText += data;
             }
+          }
+          
+          if (chunkText) {
+            fullText += chunkText;
+            mdDiv.innerHTML = renderMarkdown(fullText);
+            scrollToBottom();
           }
         }
         
