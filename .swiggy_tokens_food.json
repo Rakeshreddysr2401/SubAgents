@@ -1,0 +1,37 @@
+{
+  "tokens": {
+    "access_token": "eyJLSUQiOiI3a2w4OW0wbi0yb3BxLTVyNnMtOHQ5MS11MnYzNHd4NTZ5ejAiLCJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJvem9uZS1jeCIsInN1YiI6Ijg0MTcwODg2IiwiZXhwIjoxNzc4ODEzOTc5LCJpYXQiOjE3NzgzODE5NzksInVzZXJfcG9vbCI6IlVTRVJfUE9PTF9JTlZBTElEIiwidGlkIjoiOWUzMGM1NzYtZDk5NC00ZDhjLThhNDMtYTUyZDVhZjIwMDUwIiwidG9rZW4iOiI0MmQyOTVkYy0wM2EyLTQ1NWUtYTRjZS1kMDQ4Mjk3M2VhNTE3MWJjNmNiOC02ZGE0LTQ4ODctOWYzYy0xOWMxOWUzZjg4NjkiLCJzZXNzaW9uX2lkIjoiYk1mYU9rdkNYNVpYbzRPbkNseVErdyIsInNpYXQiOjE3NzgzODE5Nzl9.yzsphl4ROP-cQuMqV8UULKbtmxrgX7Zl8t7W7rAGZQKMc9fBPUzrqUTMwd0VyG4ek6RHUIfss7wKW6yBntHSwBr0Dkt6LEArIoQCDG-ZCBMpunlxNaX53-QOLqscBXq6pja-gR41KLcMJWwonD2b42pvlJQlrNqDdZe0WQJP4vz42s28wM6Wgw577Y34fYeLyAZSl84UHoJNQPpZlBPnADq25-gsw_Eh5zorl8xRb7yHTkJ5fkUkeUhUYtIOONLWGEnE31Af2N8dc-AAC1NJA27FkosS7HV1JEIP-YT_BBpnc8_-Fmnt_rc_C_33jbCpIs8prexQO7ET7Bka1KuIqA",
+    "token_type": "Bearer",
+    "expires_in": 432000,
+    "scope": null,
+    "refresh_token": null
+  },
+  "client_info": {
+    "redirect_uris": [
+      "http://localhost:8080/callback"
+    ],
+    "token_endpoint_auth_method": "none",
+    "grant_types": [
+      "authorization_code",
+      "refresh_token"
+    ],
+    "response_types": [
+      "code"
+    ],
+    "scope": null,
+    "client_name": "SubAgents AI",
+    "client_uri": null,
+    "logo_uri": null,
+    "contacts": null,
+    "tos_uri": null,
+    "policy_uri": null,
+    "jwks_uri": null,
+    "jwks": null,
+    "software_id": null,
+    "software_version": null,
+    "client_id": "swiggy-mcp",
+    "client_secret": null,
+    "client_id_issued_at": 1778383255,
+    "client_secret_expires_at": null
+  }
+}

@@ -26,7 +26,7 @@ import numpy as np
 import requests
 
 from src.configs.logging_config import get_logger
-from src.llm_config import VISION_BASE_URL, VISION_MODEL_NAME
+from src.llm_config import VISION_BASE_URL, VISION_MODEL_NAME, DISABLE_VISION
 from src.utils.event_log import get_event_log
 
 logger = get_logger(__name__)
@@ -93,6 +93,9 @@ class PerceptionLoop:
 
     def _maybe_caption(self, thread_id: str, b64_jpeg: str):
         """Dispatch a vision caption only if cooldown elapsed AND the model is free."""
+        if DISABLE_VISION:
+            return
+
         import time
         now = time.time()
 
