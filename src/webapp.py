@@ -12,25 +12,24 @@ from uuid import uuid4
 
 from contextlib import asynccontextmanager
 
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-
-from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, BackgroundTasks
+from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 from langgraph_sdk import get_client
-
 from src.configs.logging_config import get_logger
 from src.models.schema import ChatRequest, ChatResponse
 from src.utils.frame_buffer import store_frame
-from src.utils.perception_loop import get_perception_loop
+from src.tools.audio_tools import speak_out_loud
 
-# Offload blocking perception work off the async event loop
-_frame_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="frame")
+from sse_starlette.sse import EventSourceResponse
+import asyncio
 
 logger = get_logger(__name__)
+
+# Queue for sending events to the UI
+_event_queue = asyncio.Queue()
 
 # In-memory conversation history keyed by thread_id
 _conversations: dict[str, list[dict]] = {}
@@ -42,7 +41,7 @@ _client = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown hook."""
-    logger.info("OWP Agent started — 5-minute rolling memory active")
+    logger.info("OWP Agent started — Multimodal mode active")
     yield
     logger.info("OWP Agent stopped")
 
@@ -77,14 +76,15 @@ async def chat_ui():
     return "<h1>OWP Agent API</h1><p>Chat UI not found. Add static/index.html</p>"
 
 
-@app.post("/chat", response_model=ChatResponse)
+@app.post("/chat")
 async def chat(
     request: ChatRequest,
-    thread_id: str = Query(default=None, description="Thread ID for conversation continuity"),
+    background_tasks: BackgroundTasks,
+    thread_id: str = Query(default=None),
 ):
     """
-    Send a message and get a response.
-    Uses LangGraph SDK to invoke the graph through the LangGraph runtime.
+    Send a message and stream the response.
+    Uses LangGraph SDK to stream chunks of the AI response.
     """
     tid = thread_id or str(uuid4())
     client = _get_client()
@@ -96,62 +96,63 @@ async def chat(
     _conversations[tid].append({"role": "user", "content": request.query})
     logger.info("Chat request: thread=%s, query=%s", tid, request.query[:80])
 
-    try:
-        # Ensure thread exists in LangGraph Server
-        await _ensure_thread(client, tid)
+    async def event_generator():
+        try:
+            # Ensure thread exists in LangGraph Server
+            await _ensure_thread(client, tid)
 
-        result = await client.runs.wait(
-            thread_id=tid,
-            assistant_id="agent",
-            input={"messages":[{"role": "user", "content": request.query}]},
-        )
+            # Fallback to wait() for reliability while we debug streaming
+            result = await client.runs.wait(
+                thread_id=tid,
+                assistant_id="agent",
+                input={
+                    "messages": [{"role": "user", "content": request.query}],
+                    "always_speak": request.always_speak
+                }
+            )
+            
+            # Extract response from the final state
+            full_response = _extract_response(result)
 
+            if full_response:
+                _conversations[tid].append({"role": "assistant", "content": full_response})
+                # Yield the content as a single chunk for the frontend stream reader
+                yield f"data: {full_response}\n\n"
+                
+                if request.always_speak:
+                    # Speak in background to not block the connection close
+                    background_tasks.add_task(speak_out_loud, full_response)
+            
+            # Send metadata to signal end
+            yield f"data: [DONE] {tid}\n\n"
 
-        response_text = _extract_response(result)
+        except Exception as e:
+            logger.error(f"Streaming chat failed: {e}")
+            yield f"data: [ERROR] {str(e)}\n\n"
 
-        if response_text:
-            _conversations[tid].append({"role": "assistant", "content": response_text})
-
-        return ChatResponse(
-            response=response_text,
-            thread_id=tid,
-            messages=_conversations[tid],
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Chat request failed: %s", e)
-        raise HTTPException(status_code=500, detail=f"Chat request failed: {str(e)}")
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.websocket("/ws/frames")
 async def video_frame_ws(ws: WebSocket, thread_id: str = Query(default=None)):
-    """Receive video frames from the browser over WebSocket.
-
-    The client sends base64-encoded JPEG strings every ~2 seconds.
-    Frames are stored in a rolling buffer keyed by thread_id.
-    """
+    """Receive video frames from the browser (text/base64) or Jetson (binary)."""
     await ws.accept()
     tid = thread_id or "default"
     logger.info("Video WebSocket connected: thread=%s", tid)
 
-    perception = get_perception_loop()
-
-    loop = asyncio.get_event_loop()
-
-    def _process_frame(data: str):
-        store_frame(tid, data)
-        perception.on_frame(tid, data)
-
     try:
         while True:
-            data = await ws.receive_text()
-            # Offload to thread — keeps the async event loop free for other requests
-            loop.run_in_executor(_frame_executor, _process_frame, data)
+            message = await ws.receive()
+            if "bytes" in message:
+                # Binary path (Fastest - for Jetson)
+                import base64
+                data = base64.b64encode(message["bytes"]).decode("utf-8")
+                store_frame(tid, data)
+            elif "text" in message:
+                # Text path (Compatibility - for Browser)
+                store_frame(tid, message["text"])
     except WebSocketDisconnect:
         logger.info("Video WebSocket disconnected: thread=%s", tid)
-        perception.reset_thread(tid)
     except Exception as e:
         logger.warning("Video WebSocket error: thread=%s, err=%s", tid, e)
 
@@ -170,6 +171,29 @@ async def get_history(thread_id: str):
     return {"thread_id": thread_id, "messages": _conversations[thread_id]}
 
 
+@app.get("/events")
+async def events(request: Request):
+    """Event stream for waking up the browser UI."""
+    async def event_generator():
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                # Wait for a trigger
+                data = await asyncio.wait_for(_event_queue.get(), timeout=5.0)
+                yield {"data": data}
+            except asyncio.TimeoutError:
+                yield {"comment": "heartbeat"}
+    return EventSourceResponse(event_generator())
+
+
+@app.post("/trigger_voice")
+async def trigger_voice():
+    """Endpoint for the wake-word script to call."""
+    await _event_queue.put("start_voice")
+    return {"status": "triggered"}
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -183,21 +207,29 @@ async def _ensure_thread(client, tid: str):
 
 
 def _extract_response(result) -> str:
-    """Extract the last AI message with content and no tool_calls."""
+    """Extract the last AI message with content."""
     if not result:
         logger.warning("No result from graph invocation")
         return ""
 
     messages = result.get("messages", []) if isinstance(result, dict) else []
     for msg in reversed(messages):
+        # Check if it's an AI message with content
+        role = ""
+        content = ""
+        
         if isinstance(msg, dict):
-            if msg.get("type") == "ai" and msg.get("content") and not msg.get("tool_calls"):
-                return msg["content"]
+            role = msg.get("type", "")
+            content = msg.get("content", "")
         else:
-            if getattr(msg, "type", None) == "ai" and getattr(msg, "content", None) and not getattr(msg, "tool_calls", None):
-                return msg.content
+            role = getattr(msg, "type", "")
+            content = getattr(msg, "content", "")
 
-    logger.warning("No AI response found in result")
+        if role == "ai" and content:
+            # We found the response text
+            return content
+
+    logger.warning("No AI response content found in result")
     return ""
 
 

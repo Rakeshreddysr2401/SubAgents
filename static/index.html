@@ -622,6 +622,32 @@
     #sendBtn:hover { transform: scale(1.06); box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35); }
     #sendBtn:disabled { opacity: 0.3; cursor: not-allowed; transform: none; box-shadow: none; }
     #sendBtn svg { width: 18px; height: 18px; }
+
+    .mic-btn {
+      width: 44px; height: 44px;
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+    .mic-btn:hover { background: var(--primary-light); color: var(--primary); border-color: var(--primary); }
+    .mic-btn.active {
+      background: #ef4444;
+      color: white;
+      border-color: #ef4444;
+      animation: pulse-mic 1.5s infinite;
+    }
+    @keyframes pulse-mic {
+      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+      70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+    .mic-btn svg { width: 18px; height: 18px; }
+
     .input-hint {
       text-align: center;
       font-size: 10px;
@@ -674,6 +700,10 @@
       <h1>SubAgents</h1>
     </div>
     <div class="header-right">
+      <div class="header-pill" style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 10px;">VOICE:</span>
+        <button id="voiceToggle" class="btn-tiny" style="width: 60px; padding: 2px 0;" onclick="toggleVoiceResponse()">OFF</button>
+      </div>
       <span class="header-pill" id="threadDisplay">No thread</span>
       <button class="header-btn" onclick="newThread()">+ New Chat</button>
     </div>
@@ -779,7 +809,15 @@
 
       <div class="input-area">
         <div class="input-wrapper">
-          <textarea id="chatInput" rows="1" placeholder="Type your message..." autofocus></textarea>
+          <button id="micBtn" class="mic-btn" onclick="toggleSpeech()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+              <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+          </button>
+          <textarea id="chatInput" rows="1" placeholder="Type or speak..." autofocus></textarea>
           <button id="sendBtn" onclick="sendMessage()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <line x1="22" y1="2" x2="11" y2="13"></line>
@@ -971,6 +1009,81 @@
       if (frameWS && frameWS.readyState === WebSocket.OPEN) frameWS.send(b64);
     }
 
+    let alwaysSpeak = false;
+
+    function toggleVoiceResponse() {
+      alwaysSpeak = !alwaysSpeak;
+      const btn = document.getElementById("voiceToggle");
+      btn.textContent = alwaysSpeak ? "ON" : "OFF";
+      btn.style.color = alwaysSpeak ? "var(--green)" : "var(--text-secondary)";
+      btn.style.borderColor = alwaysSpeak ? "var(--green)" : "var(--border)";
+    }
+
+    // ── Speech Recognition ──
+    let recognition = null;
+    let isListening = false;
+    const micBtn = document.getElementById("micBtn");
+
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        isListening = true;
+        micBtn.classList.add("active");
+      };
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        chatInput.value = transcript;
+        sendMessage();
+      };
+
+      recognition.onerror = (event) => {
+        console.error("Speech error", event.error);
+        stopListening();
+      };
+
+      recognition.onend = () => {
+        stopListening();
+      };
+    } else {
+      micBtn.style.display = "none";
+    }
+
+    function toggleSpeech() {
+      if (isListening) {
+        recognition.stop();
+      } else {
+        recognition.start();
+      }
+    }
+
+    function stopListening() {
+      isListening = false;
+      micBtn.classList.remove("active");
+    }
+
+    // ── Wake Word Listener (SSE) ──
+    function setupEventSource() {
+      const source = new EventSource("/events");
+      source.onmessage = (event) => {
+        if (event.data === "start_voice") {
+          console.log("Wake word detected via backend trigger!");
+          if (!isListening) toggleSpeech();
+        }
+      };
+      source.onerror = (err) => {
+        console.warn("SSE connection lost, reconnecting...");
+        source.close();
+        setTimeout(setupEventSource, 3000);
+      };
+    }
+    setupEventSource();
+
     // ── Send message ──
     async function sendMessage() {
       const query = chatInput.value.trim();
@@ -980,29 +1093,96 @@
 
       sending = true; sendBtn.disabled = true;
       chatInput.value = ""; chatInput.style.height = "auto";
-      addMessage("user", query); showTyping();
+      addMessage("user", query);
+      
+      // Create a bot message bubble that we will update progressively
+      const botMsgDiv = document.createElement("div");
+      botMsgDiv.className = "message bot";
+      const avatar = document.createElement("div");
+      avatar.className = "avatar";
+      avatar.textContent = "S";
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      const mdDiv = document.createElement("div");
+      mdDiv.className = "md-content";
+      bubble.appendChild(mdDiv);
+      botMsgDiv.appendChild(avatar);
+      botMsgDiv.appendChild(bubble);
+      
+      // Add typing indicator while waiting for first chunk
+      const typing = document.createElement("div");
+      typing.className = "typing";
+      typing.innerHTML = "<span></span><span></span><span></span>";
+      mdDiv.appendChild(typing);
+      
+      chatContainer.appendChild(botMsgDiv);
+      scrollToBottom();
+
+      let fullText = "";
 
       try {
         const url = new URL("/chat", API_BASE);
         if (threadId) url.searchParams.set("thread_id", threadId);
-        const resp = await fetch(url.toString(), {
+        
+        const response = await fetch(url.toString(), {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-          body: JSON.stringify({ query }),
+          body: JSON.stringify({ query, always_speak: alwaysSpeak }),
         });
-        hideTyping();
-        if (!resp.ok) { const e = await resp.json().catch(() => ({ detail: resp.statusText })); throw new Error(e.detail || `HTTP ${resp.status}`); }
-        const data = await resp.json();
-        const isNew = threadId !== data.thread_id;
-        threadId = data.thread_id;
-        threadDisplay.textContent = threadId.slice(0, 8) + "...";
-        threadDisplay.title = threadId;
-        if (isNew && cameraActive) reconnectFrameWS();
-        addMessage("bot", data.response || "(no response)");
+
+        if (!response.ok) {
+          const e = await response.json().catch(() => ({ detail: response.statusText }));
+          throw new Error(e.detail || `HTTP ${response.status}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        
+        // Remove typing indicator once stream starts
+        mdDiv.innerHTML = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          
+          const chunk = decoder.decode(value);
+          const lines = chunk.split("\n");
+          
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              const data = line.slice(6);
+              
+              if (data.startsWith("[DONE]")) {
+                const newTid = data.split(" ")[1];
+                if (threadId !== newTid) {
+                  threadId = newTid;
+                  threadDisplay.textContent = threadId.slice(0, 8) + "...";
+                  threadDisplay.title = threadId;
+                  if (cameraActive) reconnectFrameWS();
+                }
+                continue;
+              }
+              
+              if (data.startsWith("[ERROR]")) {
+                throw new Error(data.slice(8));
+              }
+              
+              fullText += data;
+              mdDiv.innerHTML = renderMarkdown(fullText);
+              scrollToBottom();
+            }
+          }
+        }
+        
+        // Add copy buttons to the finished message
+        addCopyButtons(mdDiv);
+
       } catch (err) {
-        hideTyping(); showError(err.message);
-        addMessage("bot", `**Error:** ${err.message}`);
-      } finally { sending = false; sendBtn.disabled = false; chatInput.focus(); }
+        mdDiv.innerHTML = `<div style="color: #ef4444; font-weight: 500;">Error: ${err.message}</div>`;
+        showError(err.message);
+      } finally {
+        sending = false; sendBtn.disabled = false; chatInput.focus();
+      }
     }
   </script>
 </body>

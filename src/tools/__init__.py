@@ -1,10 +1,6 @@
-from src.tools.vision_tools import look_now
-from src.tools.memory_tools import recall_recent
+from src.tools.vision_tools import capture_webcam
+from src.tools.system_tools import get_system_info, open_mac_app
 
-# recall_recent: fast text log (no LLaVA call) — always try first
-# look_now:      fresh frame → LLaVA — only when text log can't answer
+ALL_TOOLS = [capture_webcam, get_system_info, open_mac_app]
 
-ALL_TOOLS = [recall_recent, look_now]
-
-VIDEO_ANALYSIS_TOOLS = [recall_recent, look_now]
-SUPERVISOR_TOOLS = [recall_recent, look_now]
+SUPERVISOR_TOOLS = ALL_TOOLS

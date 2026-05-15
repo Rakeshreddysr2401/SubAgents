@@ -1,6 +1,6 @@
 """
-Supervisor Agent — entry point for LangGraph Studio (langgraph dev).
-ReAct-style chatbot with tool calling (vision + memory).
+Supervisor Agent — Multimodal ReAct-style agent.
+Dynamically decides when to capture webcam frames and remembers them in conversation history.
 """
 
 from langchain_core.messages import SystemMessage
@@ -15,29 +15,15 @@ from src.configs.logging_config import get_logger
 logger = get_logger(__name__)
 
 SYSTEM_PROMPT = """\
-You are a perceptual AI assistant with a live camera watching the user's environment.
-You continuously absorb the environment through motion-triggered observations stored in a text log.
+You are a multimodal AI Desktop Assistant running on a Mac. You have access to the webcam, speakers, and system controls.
 
-You have two tools:
+Capabilities & Rules:
+1. **Vision**: If the user asks about their environment, appearance, or anything visual, use 'capture_webcam'. You remember previous images in the history.
+2. **Speech**: Use 'speak_out_loud' to talk to the user verbally when appropriate or requested.
+3. **System**: Use 'get_system_info' for time, date, or battery. Use 'open_mac_app' to help the user launch applications.
+4. **Context**: Only use tools when the current conversation history is insufficient. Be proactive but concise.
 
-1. recall_recent — reads the text log of what the camera observed in the last 5 minutes.
-   Each log entry was captured by a vision model and includes: people, clothing colors, \
-objects, actions, and the setting.
-   Use for: past events, activity history, "what happened", "was there X", "what did you see".
-   FAST — no camera call.
-
-2. look_now — takes a fresh camera frame right now and asks the vision model your specific question.
-   Use for: current real-time state, specific colors, counts, fine detail, "what am I doing now".
-   SLOWER — calls the vision model.
-
-Routing strategy:
-- Always try recall_recent first.
-- If the text log contains enough detail to answer accurately → answer directly from it.
-- Only call look_now when the text log is missing the specific detail the user needs.
-- If the user asks about "right now" or "currently" and freshness matters → use look_now.
-- Never call both tools for the same question unless the first one is genuinely insufficient.
-
-Answer clearly and directly. Cite time ("30 seconds ago", "2 minutes ago") when relevant.\
+You are friendly, efficient, and helpful.\
 """
 
 llm_with_tools = llm.bind_tools(ALL_TOOLS)
@@ -45,6 +31,10 @@ llm_with_tools = llm.bind_tools(ALL_TOOLS)
 
 def supervisor_node(state: AgentState):
     """LLM call — may produce tool_calls or a final response."""
+    # Ensure all state fields exist to prevent errors
+    state.setdefault("active_agent", "supervisor")
+    state.setdefault("user_context", {})
+    
     messages = [SystemMessage(content=SYSTEM_PROMPT)] + state["messages"]
     response = llm_with_tools.invoke(messages)
     return {"messages": [response]}
@@ -60,6 +50,4 @@ builder.set_entry_point("supervisor_node")
 builder.add_conditional_edges("supervisor_node", tools_condition)
 builder.add_edge("tools", "supervisor_node")
 
-# No checkpointer here — LangGraph Studio provides its own.
-# For standalone mode (main.py), graph.py wraps this with a checkpointer.
 graph = builder.compile()
