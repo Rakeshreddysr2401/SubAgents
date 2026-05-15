@@ -2,7 +2,8 @@
   "$schema": "https://langgra.ph/schema.json",
   "dependencies": ["."],
   "graphs": {
-    "agent": "./src/agents/supervisor_agent.py:graph"
+    "agent": "./graph.py:graph",
+    "swiggy_food": "./src/agents/swiggy_food_agent.py:graph"
   },
   "env": ".env",
   "http": {

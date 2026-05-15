@@ -13,8 +13,6 @@ def speak_out_loud(text: str) -> None:
     """
     try:
         logger.info(f"Speaking: {text[:50]}...")
-        # Using the native macOS 'say' command
-        import subprocess
         subprocess.run(["say", text], check=False)
     except Exception as e:
         logger.error(f"Speech failed: {e}")

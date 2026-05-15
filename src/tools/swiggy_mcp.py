@@ -1,0 +1,45 @@
+import os
+import asyncio
+import logging
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+logger = logging.getLogger(__name__)
+
+_FOOD_MCP_URL = os.getenv("SWIGGY_FOOD_MCP_URL", "https://mcp.swiggy.com/food")
+_ACCESS_TOKEN = os.getenv("SWIGGY_ACCESS_TOKEN", "")
+
+
+async def _fetch_food_tools() -> list:
+    headers = {}
+    if _ACCESS_TOKEN:
+        headers["Authorization"] = f"Bearer {_ACCESS_TOKEN}"
+
+    async with MultiServerMCPClient(
+        {
+            "swiggy_food": {
+                "transport": "streamable_http",
+                "url": _FOOD_MCP_URL,
+                "headers": headers,
+            }
+        }
+    ) as client:
+        return client.get_tools()
+
+
+def _load_sync() -> list:
+    try:
+        try:
+            asyncio.get_running_loop()
+            # Already inside a running loop (e.g. LangGraph hot-reload).
+            # Run in a separate thread to avoid "This event loop is already running".
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(asyncio.run, _fetch_food_tools()).result()
+        except RuntimeError:
+            return asyncio.run(_fetch_food_tools())
+    except Exception as e:
+        logger.warning("Swiggy Food MCP unavailable — tools disabled: %s", e)
+        return []
+
+
+SWIGGY_FOOD_TOOLS: list = _load_sync()
