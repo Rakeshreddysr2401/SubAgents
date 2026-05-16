@@ -142,15 +142,34 @@ Create a `.env` file in the project root:
 
 ```env
 # LLM backend (Ollama or llama.cpp OpenAI-compatible server)
-LLAMA_CPP_BASE_URL=http://localhost:8080/v1
-SUPERVISOR_MODEL=multimodal-model
-
-# Swiggy Food Agent (optional — agent starts without these, tools will be empty)
-SWIGGY_ACCESS_TOKEN=<your-bearer-token>
-SWIGGY_FOOD_MCP_URL=https://mcp.swiggy.com/food   # default, can omit
+LLAMA_CPP_BASE_URL=http://localhost:11434/v1
+SUPERVISOR_MODEL=llava
 ```
 
-### 3. Start the server
+No Swiggy env vars needed — auth is handled via the browser OAuth flow below.
+
+### 3. Authenticate with your Swiggy account (once)
+
+```bash
+python auth_swiggy.py
+```
+
+This opens a browser window. Log in with your Swiggy account. After login you'll see:
+
+```
+✓ Authenticated! 14 food tools available:
+  search_restaurants             Find restaurants...
+  get_restaurant_menu            Access complete menu...
+  ...
+Token saved to .swiggy_tokens_food.json
+```
+
+The token lasts 5 days. Re-run `auth_swiggy.py` when it expires.
+
+> **No Swiggy developer registration needed.** The client ID `swiggy-mcp` is the public MCP client
+> ID that Swiggy exposes for all MCP integrations — just log in with your own account.
+
+### 4. Start the LangGraph server
 
 ```bash
 langgraph dev
@@ -159,7 +178,7 @@ langgraph dev
 The LangGraph dev server starts at `http://127.0.0.1:2024`.  
 Both graphs are available in LangGraph Studio:
 - `agent` — supervisor / multimodal assistant
-- `swiggy_food` — Swiggy food ordering assistant
+- `swiggy_food` — Swiggy food ordering assistant (uses your real Swiggy account)
 
 ---
 
@@ -167,65 +186,38 @@ Both graphs are available in LangGraph Studio:
 
 ### How it works
 
-`src/tools/swiggy_mcp.py` connects to the Swiggy MCP server at import time:
-
-1. On module load, `asyncio.run()` opens a one-shot MCP handshake to `mcp.swiggy.com/food`
-2. All 14 food tools are fetched and returned as standard LangChain `BaseTool` instances
-3. These tools are stored in `SWIGGY_FOOD_TOOLS` and bound to the LLM in the food agent
-4. When the agent calls a tool, the `ToolNode` executes it — which makes an authenticated HTTP call back to the Swiggy MCP endpoint
-5. If the MCP server is unreachable (no token, no network), the list is empty and a warning is logged — the app still starts
-
-### Getting a Swiggy access token
-
-Swiggy MCP uses **OAuth 2.1 with PKCE**:
-
-**1. Apply for access**
-
-Go to `https://mcp.swiggy.com/builders/access/` and apply with your redirect URI and intended scope (`mcp:tools`). You'll receive a `client_id`.
-
-**2. Generate PKCE pair**
-
-```python
-import secrets, hashlib, base64
-
-code_verifier = secrets.token_urlsafe(32)
-digest = hashlib.sha256(code_verifier.encode()).digest()
-code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+```
+auth_swiggy.py   →  browser login  →  .swiggy_tokens_food.json
+                                              ↓
+langgraph dev  →  first swiggy_food message
+                        ↓
+              SwiggyMCPClient.session()  (loads saved token)
+                        ↓
+              load_mcp_tools(session)   (fetches all 14 tool definitions)
+                        ↓
+              LLM bound to 14 tools  →  tool calls  →  real Swiggy API
 ```
 
-**3. Redirect user to authorization**
+Key design decisions:
+- **OAuth 2.1 via `mcp` SDK** — `OAuthClientProvider` handles PKCE, token exchange, and refresh automatically
+- **Lazy session init** — MCP session opens on the first agent invocation, not at server startup
+- **Persistent session** — the session stays open for the process lifetime so tools can be reused cheaply
+- **Dynamic tool loading** — `load_mcp_tools(session)` fetches live tool definitions from Swiggy, so new tools appear automatically without code changes
+- **Token persistence** — saved to `.swiggy_tokens_food.json`; re-auth only needed when token expires
 
-```
-https://mcp.swiggy.com/auth/authorize
-  ?response_type=code
-  &client_id=<your-client-id>
-  &redirect_uri=http://localhost:<port>/callback
-  &code_challenge=<code_challenge>
-  &code_challenge_method=S256
-  &scope=mcp:tools
-```
+### Local mock (offline development)
 
-**4. Exchange code for token**
+A fully local mock MCP server is available for development without Swiggy credentials:
 
 ```bash
-curl -X POST https://mcp.swiggy.com/auth/token \
-  -H "Content-Type: application/json" \
-  -d '{
-    "grant_type": "authorization_code",
-    "code": "<code>",
-    "code_verifier": "<code_verifier>",
-    "client_id": "<client_id>",
-    "redirect_uri": "http://localhost:<port>/callback"
-  }'
+# Terminal 1 — start mock
+python src/mock/swiggy_mock_mcp.py
+
+# Terminal 2 — start LangGraph (no auth_swiggy.py needed)
+langgraph dev
 ```
 
-Response: `{ "access_token": "...", "expires_in": 432000 }` (5-day lifetime)
-
-**5. Set in `.env`**
-
-```env
-SWIGGY_ACCESS_TOKEN=<access_token>
-```
+The mock has 4 Bangalore restaurants, a stateful cart, orders, and coupons — all 14 food tools.
 
 ---
 
@@ -236,9 +228,8 @@ SWIGGY_ACCESS_TOKEN=<access_token>
 - "What am I holding right now?" — captures webcam and describes the scene
 - "How is my battery looking?" — calls `get_system_info`
 - "Open Safari" — calls `open_mac_app`
-- "Speak your response out loud" — triggers TTS
 
-### Swiggy Food Agent
+### Swiggy Food Agent (real account)
 
 - "Find me pizza places near Koramangala" — calls `search_restaurants`
 - "Show me the menu for Domino's" — calls `get_restaurant_menu`
@@ -251,7 +242,6 @@ SWIGGY_ACCESS_TOKEN=<access_token>
 
 ## Security Notes
 
-- The UI requires a Bearer token in the settings bar to authorize chat requests.
-- Swiggy access tokens have a 5-day lifetime. Treat a 401 response as a signal to re-authenticate.
-- Never log or transmit tokens over non-HTTPS connections.
-- `SWIGGY_ACCESS_TOKEN` is read from `.env` at startup — ensure `.env` is in `.gitignore`.
+- Swiggy tokens are saved to `.swiggy_tokens_food.json` — ensure this file is in `.gitignore`
+- Tokens have a 5-day lifetime; re-run `auth_swiggy.py` when expired
+- The UI requires a Bearer token in the settings bar to authorize LangGraph chat requests

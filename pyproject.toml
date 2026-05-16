@@ -20,6 +20,8 @@ dependencies = [
     "numpy>=1.26.0",
     "pillow>=10.0.0",
     "opencv-python>=4.9.0",
+    "mcp>=1.27.1",
+    "httpx-sse>=0.4.3",
     "langchain-mcp-adapters>=0.1.0",
 ]
 

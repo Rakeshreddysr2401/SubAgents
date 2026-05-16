@@ -4,28 +4,21 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from src.states.states import AgentState
 from src.llm_config import llm
-from src.tools.swiggy_mcp import SWIGGY_FOOD_TOOLS
+from src.tools.swiggy_mcp import get_swiggy_food_tools
 from src.configs.logging_config import get_logger
 
 logger = get_logger(__name__)
-
-if not SWIGGY_FOOD_TOOLS:
-    logger.warning(
-        "Swiggy Food Agent: no MCP tools loaded. "
-        "Set SWIGGY_ACCESS_TOKEN in .env and ensure mcp.swiggy.com is reachable."
-    )
 
 SYSTEM_PROMPT = """\
 You are a Swiggy food ordering assistant. Help users discover restaurants, browse menus,
 manage their cart, and place food delivery orders.
 
 Capabilities you have via tools:
-- Search restaurants and dishes by cuisine, location, or name (search_restaurants, search_menu)
-- Browse full restaurant menus with variants and add-ons (get_restaurant_menu)
-- Get saved delivery addresses (get_addresses)
-- Manage cart: view, add/modify items, flush, apply coupons (get_food_cart, update_food_cart, flush_food_cart, fetch_food_coupons, apply_food_coupon)
-- Place orders (place_food_order)
-- Track live delivery and check past orders (get_food_orders, get_food_order_details, track_food_order)
+- Search restaurants and dishes by cuisine, location, or name
+- Browse full restaurant menus with variants and add-ons
+- Get saved delivery addresses
+- Manage cart: view, add/modify items, flush, apply coupons
+- Place orders and track live delivery
 
 Guidelines:
 - Always confirm delivery address before placing an order.
@@ -36,18 +29,25 @@ Guidelines:
 - Never place an order without the user saying "yes", "confirm", or equivalent.
 """
 
-llm_with_tools = llm.bind_tools(SWIGGY_FOOD_TOOLS)
 
-
-def swiggy_food_node(state: AgentState):
+async def swiggy_food_node(state: AgentState):
+    """LLM call with real Swiggy tools — initialises MCP session on first invocation."""
+    tools = await get_swiggy_food_tools()
+    llm_with_tools = llm.bind_tools(tools)
     messages = [SystemMessage(content=SYSTEM_PROMPT)] + state["messages"]
-    response = llm_with_tools.invoke(messages)
+    response = await llm_with_tools.ainvoke(messages)
     return {"messages": [response]}
+
+
+async def swiggy_tools_node(state: AgentState):
+    """Execute whichever Swiggy MCP tool the LLM called."""
+    tools = await get_swiggy_food_tools()
+    return await ToolNode(tools).ainvoke(state)
 
 
 builder = StateGraph(AgentState)
 builder.add_node("swiggy_food_node", swiggy_food_node)
-builder.add_node("tools", ToolNode(SWIGGY_FOOD_TOOLS))
+builder.add_node("tools", swiggy_tools_node)
 
 builder.set_entry_point("swiggy_food_node")
 builder.add_conditional_edges("swiggy_food_node", tools_condition)
