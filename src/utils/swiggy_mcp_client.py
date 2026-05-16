@@ -27,7 +27,7 @@ from src.configs.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-CALLBACK_PORT = 8080
+CALLBACK_PORT = 8089
 CALLBACK_URI = f"http://localhost:{CALLBACK_PORT}/callback"
 
 
@@ -36,9 +36,9 @@ class FileTokenStorage(TokenStorage):
 
     def __init__(self, file_path: str = ".swiggy_tokens_food.json"):
         self.file_path = Path(file_path)
-        self._data = self._load()
+        self._data = self._load_sync()
 
-    def _load(self) -> dict:
+    def _load_sync(self) -> dict:
         if self.file_path.exists():
             try:
                 return json.loads(self.file_path.read_text())
@@ -46,7 +46,7 @@ class FileTokenStorage(TokenStorage):
                 logger.warning("Could not load token file: %s", e)
         return {"tokens": None, "client_info": None}
 
-    def _save(self) -> None:
+    def _save_sync(self) -> None:
         self.file_path.write_text(json.dumps(self._data, indent=2))
 
     async def get_tokens(self) -> OAuthToken | None:
@@ -62,7 +62,7 @@ class FileTokenStorage(TokenStorage):
             )
         else:
             self._data["tokens"] = None
-        self._save()
+        await asyncio.to_thread(self._save_sync)
 
     async def get_client_info(self) -> OAuthClientInformationFull | None:
         info = self._data.get("client_info")
@@ -72,12 +72,12 @@ class FileTokenStorage(TokenStorage):
         self._data["client_info"] = (
             info.model_dump(mode="json") if hasattr(info, "model_dump") else info
         )
-        self._save()
+        await asyncio.to_thread(self._save_sync)
 
 
 async def _open_browser(auth_url: str) -> None:
     print(f"\n[Swiggy Auth] Opening browser → {auth_url}")
-    webbrowser.open(auth_url)
+    await asyncio.to_thread(webbrowser.open, auth_url)
 
 
 async def _wait_for_callback() -> tuple[str, str | None]:

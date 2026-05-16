@@ -43,6 +43,8 @@ async def lifespan(app: FastAPI):
     """Startup / shutdown hook."""
     logger.info("OWP Agent started — Multimodal mode active")
     yield
+    from src.tools.swiggy_mcp import close_swiggy_session
+    await close_swiggy_session()
     logger.info("OWP Agent stopped")
 
 
@@ -71,8 +73,10 @@ if _STATIC_DIR.exists():
 @app.get("/", response_class=HTMLResponse)
 async def chat_ui():
     """Serve the built-in chat UI."""
-    if _STATIC_DIR.exists() and (_STATIC_DIR / "index.html").exists():
-        return (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    index_path = _STATIC_DIR / "index.html"
+    if _STATIC_DIR.exists() and index_path.exists():
+        content = await asyncio.to_thread(index_path.read_text, encoding="utf-8")
+        return content
     return "<h1>OWP Agent API</h1><p>Chat UI not found. Add static/index.html</p>"
 
 
@@ -84,7 +88,7 @@ async def chat(
 ):
     """
     Send a message and stream the response.
-    Uses LangGraph SDK to stream chunks of the AI response.
+    Uses LangGraph SDK to stream events from the graph.
     """
     tid = thread_id or str(uuid4())
     client = _get_client()
@@ -101,38 +105,78 @@ async def chat(
             # Ensure thread exists in LangGraph Server
             await _ensure_thread(client, tid)
 
-            # Fallback to wait() for reliability while we debug streaming
-            result = await client.runs.wait(
+            full_response = ""
+            processed_msg_ids = set()
+            logger.info("Starting stream for thread=%s", tid)
+            
+            # Use stream() with values mode
+            async for event in client.runs.stream(
                 thread_id=tid,
                 assistant_id="agent",
                 input={
                     "messages": [{"role": "user", "content": request.query}],
                     "always_speak": request.always_speak
-                }
-            )
-            
-            # Extract response from the final state
-            full_response = _extract_response(result)
+                },
+                stream_mode="values",
+            ):
+                if event.event == "values":
+                    data = event.data
+                    if "messages" in data and len(data["messages"]) > 0:
+                        last_msg = data["messages"][-1]
+                        
+                        msg_id = None
+                        if isinstance(last_msg, dict):
+                            msg_id = last_msg.get("id")
+                            role = last_msg.get("type") or last_msg.get("role")
+                            content = last_msg.get("content", "")
+                        else:
+                            msg_id = getattr(last_msg, "id", None)
+                            role = getattr(last_msg, "type", "") or getattr(last_msg, "role", "")
+                            content = getattr(last_msg, "content", "")
+
+                        # Skip if we already processed this specific message
+                        if msg_id and msg_id in processed_msg_ids:
+                            continue
+                        
+                        if (role in ["ai", "assistant", "tool"]) and content:
+                            if msg_id:
+                                processed_msg_ids.add(msg_id)
+                            
+                            if isinstance(content, list):
+                                text_blocks = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+                                content = "".join(text_blocks)
+                            
+                            if content and isinstance(content, str):
+                                # If it's an AI message, we track it for history/speech
+                                if role in ["ai", "assistant"]:
+                                    full_response = content
+                                
+                                for line in content.split("\n"):
+                                    yield f"data: {line}\n"
+                                yield "\n"
 
             if full_response:
                 _conversations[tid].append({"role": "assistant", "content": full_response})
-                # Yield each line with a 'data: ' prefix. 
-                # SSE standard: consecutive data: lines are joined with \n by the client.
-                event_data = ""
-                for line in full_response.split('\n'):
-                    event_data += f"data: {line}\n"
-                yield event_data + "\n"
-                
                 if request.always_speak:
-                    # Speak in background to not block the connection close
-                    background_tasks.add_task(speak_out_loud, full_response)
+                    try:
+                        from src.tools.audio_tools import speak_out_loud
+                        # speak_out_loud is a tool object, use its .func to call it directly
+                        background_tasks.add_task(speak_out_loud.func, full_response)
+                    except Exception as audio_err:
+                        logger.warning("Failed to queue background speech: %s", audio_err)
+            else:
+                logger.warning("Stream ended with no AI content for thread=%s", tid)
             
             # Send metadata to signal end
             yield f"data: [DONE] {tid}\n\n"
 
         except Exception as e:
-            logger.error(f"Streaming chat failed: {e}")
-            yield f"data: [ERROR] {str(e)}\n\n"
+            logger.error("Streaming chat failed for thread=%s: %s", tid, e, exc_info=True)
+            # Ensure the error is also properly formatted as SSE
+            error_msg = str(e)
+            for line in error_msg.split("\n"):
+                yield f"data: [ERROR] {line}\n"
+            yield "\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -208,57 +252,6 @@ async def _ensure_thread(client, tid: str):
         await client.threads.get(thread_id=tid)
     except Exception:
         await client.threads.create(thread_id=tid)
-
-
-def _extract_response(result) -> str:
-    """Extract and combine all AI message content from the result."""
-    if not result:
-        logger.warning("No result from graph invocation")
-        return ""
-
-    messages = result.get("messages", []) if isinstance(result, dict) else []
-    ai_contents = []
-    
-    # We want to capture the NEW messages generated in this specific run.
-    # Usually, the result contains the full history, so we look for the last 
-    # sequence of AI messages that weren't there before.
-    # However, for simplicity and to match the 'always_speak' logic,
-    # we'll collect all AI content that isn't just a tool call placeholder.
-    
-    for msg in messages:
-        content = ""
-        role = ""
-        
-        if isinstance(msg, dict):
-            role = msg.get("type", "")
-            content = msg.get("content", "")
-        else:
-            role = getattr(msg, "type", "")
-            content = getattr(msg, "content", "")
-
-        # Only accumulate AI content from the CURRENT turn.
-        # Since we append the User message in webapp.py before the run,
-        # we can look for AI messages appearing AFTER the last User message.
-        pass # Placeholder for logic below
-
-    # REFINED LOGIC: Find the last User message and take everything AI after it.
-    last_user_idx = -1
-    for i, msg in enumerate(messages):
-        role = msg.get("type", "") if isinstance(msg, dict) else getattr(msg, "type", "")
-        if role == "human" or role == "user":
-            last_user_idx = i
-            
-    for i in range(last_user_idx + 1, len(messages)):
-        msg = messages[i]
-        role = msg.get("type", "") if isinstance(msg, dict) else getattr(msg, "type", "")
-        content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
-        if role == "ai" and content:
-            ai_contents.append(content)
-
-    final_text = "\n\n".join(ai_contents).strip()
-    if not final_text:
-        logger.warning("No AI response content found in result")
-    return final_text
 
 
 # Global exception handler

@@ -7,3 +7,5 @@ class AgentState(TypedDict):
     """Simplified state for the multimodal supervisor."""
     messages: Annotated[List[BaseMessage], add_messages]
     always_speak: Optional[bool]
+    active_agent: Optional[str]
+    user_context: Optional[dict]

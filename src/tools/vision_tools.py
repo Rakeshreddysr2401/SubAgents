@@ -9,7 +9,7 @@ from src.configs.logging_config import get_logger
 logger = get_logger(__name__)
 
 @tool
-def capture_webcam(config: RunnableConfig) -> list:
+async def capture_webcam(config: RunnableConfig) -> list:
     """Capture the latest frame from the user's webcam.
 
     Use this tool whenever you need to see what is happening in the user's environment,

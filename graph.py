@@ -1,5 +1,4 @@
-from src.agents.supervisor_agent import  builder
-from src.configs.memory_config import get_memory
+from src.agents.supervisor_agent import builder
 
-graph = builder.compile(checkpointer=get_memory())
+graph = builder.compile()
 __all__ = ["graph"]

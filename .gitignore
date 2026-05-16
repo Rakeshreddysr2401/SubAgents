@@ -24,3 +24,7 @@ wheels/
 # IDE
 .idea/
 .vscode/
+
+# Tokens and sensitive data
+.swiggy_tokens_*.json
+.swiggy_tokens_food.json
