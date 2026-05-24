@@ -14,7 +14,7 @@ async def _fetch_food_tools() -> list:
     if _ACCESS_TOKEN:
         headers["Authorization"] = f"Bearer {_ACCESS_TOKEN}"
 
-    async with MultiServerMCPClient(
+    client = MultiServerMCPClient(
         {
             "swiggy_food": {
                 "transport": "streamable_http",
@@ -22,8 +22,8 @@ async def _fetch_food_tools() -> list:
                 "headers": headers,
             }
         }
-    ) as client:
-        return client.get_tools()
+    )
+    return await client.get_tools()
 
 
 def _load_sync() -> list:

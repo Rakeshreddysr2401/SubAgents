@@ -8,6 +8,7 @@ Routes:
   GET  /health   -> Health check
   GET  /history/{thread_id} -> Conversation history
 """
+import json
 from uuid import uuid4
 
 from contextlib import asynccontextmanager
@@ -110,25 +111,21 @@ async def chat(
                     "always_speak": request.always_speak
                 }
             )
-            
-            # Extract response from the final state
+
+            # Extract response and active_agent from the final state
             full_response = _extract_response(result)
+            active_agent = result.get("active_agent", "conversation") if isinstance(result, dict) else "conversation"
 
             if full_response:
                 _conversations[tid].append({"role": "assistant", "content": full_response})
-                # Yield each line with a 'data: ' prefix. 
-                # SSE standard: consecutive data: lines are joined with \n by the client.
-                event_data = ""
-                for line in full_response.split('\n'):
-                    event_data += f"data: {line}\n"
-                yield event_data + "\n"
-                
+                payload = json.dumps({"text": full_response, "active_agent": active_agent})
+                yield f"data: {payload}\n\n"
+
                 if request.always_speak:
-                    # Speak in background to not block the connection close
                     background_tasks.add_task(speak_out_loud, full_response)
-            
+
             # Send metadata to signal end
-            yield f"data: [DONE] {tid}\n\n"
+            yield f"data: {json.dumps({'done': True, 'thread_id': tid, 'active_agent': active_agent})}\n\n"
 
         except Exception as e:
             logger.error(f"Streaming chat failed: {e}")

@@ -1,20 +1,18 @@
-# SubAgents — Perceptual AI Desktop Assistant
+# SubAgents — Multi-Agent AI Desktop Assistant
 
-SubAgents is a multimodal AI assistant designed to run locally, providing "eyes" through your webcam and a "voice" through your speakers. It leverages **LangGraph**, **FastAPI**, and **Ollama/llama.cpp** to create a proactive, conversational agent that can see, hear, and interact with its environment.
-
-It also ships a **Swiggy Food Agent** that connects to [Swiggy's MCP platform](https://mcp.swiggy.com/builders/docs/) to let an AI assistant search restaurants, manage a cart, and place food delivery orders.
+A locally-run, multimodal AI assistant built on **LangGraph**, **FastAPI**, and **llama.cpp / Ollama**. Multiple specialized agents collaborate through structured handovers to handle general queries, food ordering, and delivery tracking — without losing conversational context between agents.
 
 ---
 
 ## Key Features
 
-- **Multimodal Perception**: Uses a webcam to see and describe your environment in real-time.
-- **Conversational Voice**: Speaks responses out loud using the macOS `say` command.
-- **Persistent Memory**: Remembers visual context across conversation turns (powered by LangGraph checkpointers).
-- **Tool-Integrated Agent**: A ReAct-style supervisor agent that dynamically decides when to look at the camera, check system info, or speak.
-- **Local-First**: Designed to run with local LLMs (LLaVA, Gemma, etc.) via Ollama or llama.cpp for privacy and speed.
-- **Interactive UI**: Custom web-based chat interface with real-time video streaming over WebSockets.
-- **Swiggy Food Agent**: MCP-powered food ordering agent — search restaurants, browse menus, manage cart, and track delivery.
+- **Multi-Agent Coordination** — 4 agents with typed handover: supervisor (router), conversation, swiggy, tracker
+- **Multimodal Perception** — live webcam vision via the conversation agent
+- **Food Ordering** — Swiggy MCP integration: search restaurants, manage cart, place and track orders
+- **Web Search** — Tavily-powered real-time search in the conversation agent
+- **Conversational Voice** — optional TTS via macOS `say` command
+- **Persistent Memory** — conversation history across turns via LangGraph checkpointers
+- **Local-First** — runs with local LLMs (LLaVA, Gemma, etc.) via llama.cpp or Ollama
 
 ---
 
@@ -22,101 +20,97 @@ It also ships a **Swiggy Food Agent** that connects to [Swiggy's MCP platform](h
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                        Frontend (UI)                     │
-│  HTML/JS SPA  ──SSE──►  Chat stream                      │
-│               ──WS──►   Video frames                     │
-└────────────────────────────┬─────────────────────────────┘
-                             │ HTTP / WebSocket
-┌────────────────────────────▼─────────────────────────────┐
-│                   Backend (FastAPI)                       │
+│                      Frontend (UI)                       │
+│  HTML/JS SPA ──SSE──► /chat  (JSON stream)               │
+│              ──WS──►  /ws/frames  (video frames)         │
+└───────────────────────────┬──────────────────────────────┘
+                            │ HTTP / WebSocket
+┌───────────────────────────▼──────────────────────────────┐
+│                    FastAPI (webapp.py)                    │
 │  /chat  /history  /events  /ws/frames  /trigger_voice    │
-└────────────────────────────┬─────────────────────────────┘
-                             │ LangGraph SDK
-        ┌────────────────────┴─────────────────────┐
-        │              LangGraph Server             │
-        │                                           │
-        │   Graph: "agent"         Graph: "swiggy_food"  │
-        │   (Supervisor Agent)     (Food Ordering Agent) │
-        │                                           │
-        │   supervisor_node ◄──► ToolNode           │
-        │        │                   │              │
-        │   capture_webcam     swiggy MCP tools     │
-        │   get_system_info    (via HTTP MCP)        │
-        │   open_mac_app                            │
-        └───────────────────────────────────────────┘
+└───────────────────────────┬──────────────────────────────┘
+                            │ LangGraph SDK
+┌───────────────────────────▼──────────────────────────────┐
+│                  LangGraph Server (graph: "agent")        │
+│                                                          │
+│   START ──► supervisor (router)                          │
+│                  │                                       │
+│          ┌───────┴──────────┐                            │
+│          ▼                  ▼                            │
+│     conversation          swiggy ──► tracker             │
+│    (general + vision)   (ordering)  (tracking)           │
+│                                                          │
+│   Handover types: apply_handover │ respond_then_wait     │
+│                   respond_and_chain                      │
+└──────────────────────────────────────────────────────────┘
 ```
 
-### Supervisor Agent (agent graph)
+### Agent Roles
 
-A ReAct-style agent that runs as the default assistant:
+| Agent | Responsibility | Tools |
+|---|---|---|
+| **supervisor** | Pure router — decides which agent handles each request | `handover` |
+| **conversation** | General queries, web search, webcam vision, system info | `capture_webcam`, `get_system_info`, `open_mac_app`, `tavily_search`*, `handover` |
+| **swiggy** | Food ordering: search, cart, place orders | 14 Swiggy MCP tools, `handover` |
+| **tracker** | Order status and live delivery tracking | Swiggy MCP tools, `handover` |
 
-```
-User input
-    └─► supervisor_node (LLM + tools)
-              ├─ tool_calls? ──► ToolNode ──► supervisor_node (loop)
-              └─ no tools   ──► END
-```
+*Requires `TAVILY_API_KEY`
 
-**Tools:**
-| Tool | Description |
-|------|-------------|
-| `capture_webcam` | Grabs latest frame from the in-memory buffer, returns as a base64 image |
-| `get_system_info` | Returns current time, date, battery status |
-| `open_mac_app` | Opens a macOS application by name |
-
-### Swiggy Food Agent (swiggy_food graph)
-
-A food ordering assistant that connects to Swiggy's MCP platform over streamable HTTP:
+### The 3 Handover Types
 
 ```
-User input
-    └─► swiggy_food_node (LLM + 14 Swiggy MCP tools)
-              ├─ tool_calls? ──► ToolNode ──► swiggy_food_node (loop)
-              └─ no tools   ──► END
+Type 1 — apply_handover
+  Current agent:  (no text) ──► next agent responds immediately
+  Use when:       supervisor routes silently to a sub-agent
+
+Type 2 — respond_then_wait
+  Current agent:  "Here's my answer" ──► END
+  Next agent:     picks up on the next human turn
+  Use when:       agent finishes and hands context to supervisor
+
+Type 3 — respond_and_chain
+  Current agent:  "Order placed!" ──► next agent responds immediately
+  Use when:       swiggy places an order → tracker immediately checks status
 ```
-
-**Tools (loaded from `mcp.swiggy.com/food`):**
-
-| Category | Tools |
-|----------|-------|
-| Discover | `search_restaurants`, `search_menu`, `get_restaurant_menu`, `get_addresses` |
-| Cart | `get_food_cart`, `update_food_cart`, `flush_food_cart`, `fetch_food_coupons`, `apply_food_coupon` |
-| Order | `place_food_order` |
-| Track | `get_food_orders`, `get_food_order_details`, `track_food_order` |
 
 ---
 
 ## Project Structure
 
-```text
+```
 SubAgents/
-├── src/
-│   ├── agents/
-│   │   ├── supervisor_agent.py   # Multimodal ReAct supervisor
-│   │   └── swiggy_food_agent.py  # Swiggy food ordering agent
-│   ├── configs/
-│   │   ├── logging_config.py     # Structured logging setup
-│   │   └── memory_config.py      # MemorySaver checkpointer
-│   ├── models/
-│   │   └── schema.py             # API request/response schemas
-│   ├── states/
-│   │   └── states.py             # AgentState TypedDict
-│   ├── tools/
-│   │   ├── __init__.py           # Exports ALL_TOOLS
-│   │   ├── vision_tools.py       # capture_webcam tool
-│   │   ├── audio_tools.py        # speak_out_loud utility
-│   │   ├── system_tools.py       # get_system_info, open_mac_app
-│   │   └── swiggy_mcp.py         # Swiggy MCP client + SWIGGY_FOOD_TOOLS
-│   ├── utils/
-│   │   └── frame_buffer.py       # Thread-safe in-memory frame buffer
-│   ├── llm_config.py             # LLM setup (Ollama / llama.cpp)
-│   └── webapp.py                 # FastAPI server, WebSocket, SSE
-├── static/
-│   └── index.html                # Web UI
-├── graph.py                      # Compiled LangGraph entry point
+├── graph.py                      # Unified LangGraph entry point (all 4 agents)
 ├── langgraph.json                # LangGraph deployment config
-├── pyproject.toml                # Dependencies and project metadata
-└── wake_word.py                  # Voice-activation trigger script
+├── pyproject.toml
+├── wake_word.py                  # Voice-activation trigger script
+├── static/
+│   └── index.html                # Web chat UI
+└── src/
+    ├── agents/
+    │   ├── supervisor_agent.py   # Pure router — calls handover(), never responds
+    │   ├── conversation_agent.py # General queries, vision, web search
+    │   ├── swiggy_agent.py       # Food ordering
+    │   ├── tracker_agent.py      # Order tracking
+    │   └── handover.py           # 3 handover handler nodes + loop guard
+    ├── configs/
+    │   ├── logging_config.py
+    │   └── memory_config.py      # MemorySaver checkpointer
+    ├── models/
+    │   └── schema.py             # ChatRequest / ChatResponse schemas
+    ├── states/
+    │   └── states.py             # AgentState TypedDict
+    ├── tools/
+    │   ├── __init__.py           # Per-agent tool sets
+    │   ├── handover_tool.py      # handover() routing tool
+    │   ├── vision_tools.py       # capture_webcam
+    │   ├── audio_tools.py        # speak_out_loud utility
+    │   ├── system_tools.py       # get_system_info, open_mac_app
+    │   └── swiggy_mcp.py         # Swiggy MCP client → SWIGGY_FOOD_TOOLS
+    ├── utils/
+    │   ├── frame_buffer.py       # Thread-safe in-memory frame buffer
+    │   └── message_utils.py      # Strip handover noise before LLM calls
+    ├── llm_config.py             # LLM setup (llama.cpp / Ollama)
+    └── webapp.py                 # FastAPI + SSE + WebSocket server
 ```
 
 ---
@@ -125,10 +119,10 @@ SubAgents/
 
 ### Prerequisites
 
-- **Python 3.11+**
-- **uv** (recommended package manager)
-- **macOS** (required for `say` command and `open_mac_app` tool)
-- **Local LLM Server**: [Ollama](https://ollama.ai) or [llama.cpp](https://github.com/ggerganov/llama.cpp) running a multimodal model (e.g., LLaVA)
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/) package manager
+- macOS (required for `say` TTS and `open_mac_app`)
+- Local LLM server: [Ollama](https://ollama.ai) or [llama.cpp](https://github.com/ggerganov/llama.cpp) running a multimodal model (e.g., LLaVA)
 
 ### 1. Install dependencies
 
@@ -141,13 +135,16 @@ uv sync
 Create a `.env` file in the project root:
 
 ```env
-# LLM backend (Ollama or llama.cpp OpenAI-compatible server)
+# LLM backend — llama.cpp or Ollama (OpenAI-compatible endpoint)
 LLAMA_CPP_BASE_URL=http://localhost:8080/v1
 SUPERVISOR_MODEL=multimodal-model
 
-# Swiggy Food Agent (optional — agent starts without these, tools will be empty)
+# Swiggy Food Agent (optional — app starts without these, swiggy/tracker tools will be empty)
 SWIGGY_ACCESS_TOKEN=<your-bearer-token>
-SWIGGY_FOOD_MCP_URL=https://mcp.swiggy.com/food   # default, can omit
+SWIGGY_FOOD_MCP_URL=https://mcp.swiggy.com/food
+
+# Web search for conversation agent (optional)
+TAVILY_API_KEY=<your-tavily-key>
 ```
 
 ### 3. Start the server
@@ -157,33 +154,123 @@ langgraph dev
 ```
 
 The LangGraph dev server starts at `http://127.0.0.1:2024`.  
-Both graphs are available in LangGraph Studio:
-- `agent` — supervisor / multimodal assistant
-- `swiggy_food` — Swiggy food ordering assistant
+The unified `agent` graph is available in LangGraph Studio.
+
+---
+
+## Environment Variables
+
+| Variable | Default | Required | Purpose |
+|---|---|---|---|
+| `LLAMA_CPP_BASE_URL` | `http://singireddys-mac-mini.local:8080/v1` | Yes | LLM server base URL |
+| `SUPERVISOR_MODEL` | `multimodal-model` | Yes | Model name loaded on LLM server |
+| `SWIGGY_ACCESS_TOKEN` | *(empty)* | No | Bearer token for Swiggy MCP |
+| `SWIGGY_FOOD_MCP_URL` | `https://mcp.swiggy.com/food` | No | Swiggy MCP endpoint |
+| `TAVILY_API_KEY` | *(empty)* | No | Tavily web search API key |
+
+---
+
+## API Reference
+
+### POST /chat
+
+Send a message and stream the response.
+
+**Request:**
+```json
+{ "query": "find me pizza near Koramangala", "always_speak": false }
+```
+
+**Response** (Server-Sent Events stream):
+```
+data: {"text": "Here are some pizza places...", "active_agent": "swiggy"}\n\n
+data: {"done": true, "thread_id": "abc123", "active_agent": "swiggy"}\n\n
+```
+
+Each SSE event is valid JSON. Read `active_agent` to know which agent generated the response.
+
+**Query param:** `?thread_id=<id>` — pass to continue an existing conversation. A new UUID is generated if omitted.
+
+### WebSocket /ws/frames
+
+Stream video frames for webcam vision.
+
+**Query param:** `?thread_id=<id>`  
+**Message format:** Base64-encoded JPEG as text, or raw bytes (binary path for Jetson).  
+The latest frame per thread is stored in memory and used when the conversation agent calls `capture_webcam`.
+
+### GET /history/{thread_id}
+
+Returns conversation history for a thread.
+
+```json
+{ "thread_id": "abc123", "messages": [{"role": "user", "content": "..."}, ...] }
+```
+
+### GET /health
+
+```json
+{ "status": "ok", "service": "owp-agent" }
+```
+
+### GET /events
+
+SSE stream for wake-word triggers. Yields `"start_voice"` when the wake word fires.
+
+### POST /trigger_voice
+
+Called by `wake_word.py`. Pushes a `"start_voice"` event to all `/events` listeners.
+
+---
+
+## Usage Examples
+
+### Conversation agent (general queries)
+
+```
+"What's the weather like in Bangalore today?"   → web search via Tavily
+"What am I holding right now?"                  → captures webcam, describes scene
+"What time is it and how's my battery?"         → get_system_info
+"Open Safari"                                   → open_mac_app
+"Tell me a joke"                                → direct response
+```
+
+### Swiggy agent (food ordering)
+
+```
+"Find pizza places near Koramangala"            → search_restaurants
+"Show me Domino's menu"                         → get_restaurant_menu
+"Add a Margherita pizza to my cart"             → update_food_cart
+"Do I have any coupons I can use?"              → fetch_food_coupons
+"Place my order" (after confirming cart)        → place_food_order → chains to tracker
+```
+
+### Tracker agent (order tracking)
+
+```
+"Where is my order?"                            → track_food_order
+"Show me my recent orders"                      → get_food_orders
+"What's the ETA for order #12345?"              → get_food_order_details
+```
+
+The tracker is also automatically chained after a successful order placement — it responds in the same turn without any user prompt.
 
 ---
 
 ## Swiggy MCP Integration
 
-### How it works
+`src/tools/swiggy_mcp.py` loads tools at import time:
 
-`src/tools/swiggy_mcp.py` connects to the Swiggy MCP server at import time:
+1. On module load, opens a one-shot MCP handshake to `mcp.swiggy.com/food`
+2. Fetches ~14 food tools as standard LangChain `BaseTool` instances
+3. Tools are shared between `swiggy_agent` and `tracker_agent`
+4. If the MCP server is unreachable (no token, no network), tools list is empty and a warning is logged — the app still starts
 
-1. On module load, `asyncio.run()` opens a one-shot MCP handshake to `mcp.swiggy.com/food`
-2. All 14 food tools are fetched and returned as standard LangChain `BaseTool` instances
-3. These tools are stored in `SWIGGY_FOOD_TOOLS` and bound to the LLM in the food agent
-4. When the agent calls a tool, the `ToolNode` executes it — which makes an authenticated HTTP call back to the Swiggy MCP endpoint
-5. If the MCP server is unreachable (no token, no network), the list is empty and a warning is logged — the app still starts
+### Getting a Swiggy access token (OAuth 2.1 with PKCE)
 
-### Getting a Swiggy access token
+**1. Apply for access** at `https://mcp.swiggy.com/builders/access/` — you'll receive a `client_id`.
 
-Swiggy MCP uses **OAuth 2.1 with PKCE**:
-
-**1. Apply for access**
-
-Go to `https://mcp.swiggy.com/builders/access/` and apply with your redirect URI and intended scope (`mcp:tools`). You'll receive a `client_id`.
-
-**2. Generate PKCE pair**
+**2. Generate PKCE pair:**
 
 ```python
 import secrets, hashlib, base64
@@ -193,7 +280,7 @@ digest = hashlib.sha256(code_verifier.encode()).digest()
 code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 ```
 
-**3. Redirect user to authorization**
+**3. Redirect user to authorization:**
 
 ```
 https://mcp.swiggy.com/auth/authorize
@@ -205,7 +292,7 @@ https://mcp.swiggy.com/auth/authorize
   &scope=mcp:tools
 ```
 
-**4. Exchange code for token**
+**4. Exchange code for token:**
 
 ```bash
 curl -X POST https://mcp.swiggy.com/auth/token \
@@ -221,37 +308,13 @@ curl -X POST https://mcp.swiggy.com/auth/token \
 
 Response: `{ "access_token": "...", "expires_in": 432000 }` (5-day lifetime)
 
-**5. Set in `.env`**
-
-```env
-SWIGGY_ACCESS_TOKEN=<access_token>
-```
-
----
-
-## Usage Examples
-
-### Supervisor Agent
-
-- "What am I holding right now?" — captures webcam and describes the scene
-- "How is my battery looking?" — calls `get_system_info`
-- "Open Safari" — calls `open_mac_app`
-- "Speak your response out loud" — triggers TTS
-
-### Swiggy Food Agent
-
-- "Find me pizza places near Koramangala" — calls `search_restaurants`
-- "Show me the menu for Domino's" — calls `get_restaurant_menu`
-- "Add a Margherita pizza to my cart" — calls `update_food_cart`
-- "Do I have any coupons?" — calls `fetch_food_coupons`
-- "Place my order" — shows cart summary, waits for confirmation, then calls `place_food_order`
-- "Where is my order?" — calls `track_food_order`
+**5.** Set `SWIGGY_ACCESS_TOKEN=<access_token>` in `.env`.
 
 ---
 
 ## Security Notes
 
-- The UI requires a Bearer token in the settings bar to authorize chat requests.
-- Swiggy access tokens have a 5-day lifetime. Treat a 401 response as a signal to re-authenticate.
-- Never log or transmit tokens over non-HTTPS connections.
-- `SWIGGY_ACCESS_TOKEN` is read from `.env` at startup — ensure `.env` is in `.gitignore`.
+- `SWIGGY_ACCESS_TOKEN` has a 5-day lifetime. A 401 response means re-authentication is needed.
+- Never commit `.env` to version control — it's in `.gitignore`.
+- Never transmit tokens over non-HTTPS connections.
+- The LLM server (`LLAMA_CPP_BASE_URL`) should only be accessible on your local network.

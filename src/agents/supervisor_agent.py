@@ -1,56 +1,38 @@
-"""
-Supervisor Agent — Multimodal ReAct-style agent.
-Dynamically decides when to capture webcam frames and remembers them in conversation history.
-"""
+"""Supervisor — pure router. Always calls handover(), never responds to the user directly."""
 
-from langchain_core.messages import SystemMessage
-from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolNode, tools_condition
+from langchain_core.messages import AIMessage, SystemMessage
 
+from src.configs.logging_config import get_logger
 from src.states.states import AgentState
 from src.llm_config import llm
-from src.tools import ALL_TOOLS
-from src.configs.logging_config import get_logger
+from src.tools.handover_tool import handover, HANDOVER_NAMES
+from src.utils.message_utils import prepare_messages_for_agent, safe_invoke
 
 logger = get_logger(__name__)
 
-SYSTEM_PROMPT = """\
-You are an intelligent, proactive AI Desktop Assistant. You have "eyes" through the webcam and a "voice" through the speakers.
+_SYSTEM_PROMPT = """\
+You are a routing supervisor. Your ONLY job is to decide which agent should handle the user's request and call handover() immediately. You NEVER respond to the user with text.
 
-Operational Guidelines:
-1. **Be Direct (No Narration)**: Never say "I am now using my camera" or "I am looking at a frame." Just look and describe what you see immediately.
-2. **Proactive Identification**: If you see multiple people and the user asks "What am I wearing?", don't ask who they are. Instead, describe all people present (e.g., "The person on the left is in blue, and the person on the right is in red").
-3. **Conversational Memory**: You remember images from previous turns. If the user asks a follow-up about something you already saw, don't capture a new image unless they specifically ask for a "fresh look" or if the scene has likely changed.
-4. **Tool Strategy**: 
-    - Use 'capture_webcam' for environment/visual questions.
-    - Use 'speak_out_loud' when verbal confirmation is appropriate.
-    - Use 'get_system_info' for time/battery.
+Available agents:
+- "conversation": general questions, web search, system info, visual/webcam queries, small talk, anything not food-related
+- "swiggy": food ordering, restaurant search, browsing menus, managing cart, placing Swiggy orders
+- "tracker": checking delivery status of an active or past Swiggy order
 
-You are helpful, witty, and concise. Don't be robotic.\
+Rules:
+1. Always call handover() — never write a text response.
+2. Route to "swiggy" if the user wants to order food, search restaurants, manage cart, or anything involving placing a Swiggy order.
+3. Route to "tracker" if the user asks about order status, delivery ETA, or tracking a Swiggy order.
+4. Route to "conversation" for everything else.
+5. Pass a short reason describing why (e.g. "user wants to order food", "user asking about delivery").
 """
 
-llm_with_tools = llm.bind_tools(ALL_TOOLS)
+_llm_with_tools = llm.bind_tools([handover])
 
 
 def supervisor_node(state: AgentState):
-    """LLM call — may produce tool_calls or a final response."""
-    # Ensure all state fields exist to prevent errors
-    state.setdefault("active_agent", "supervisor")
-    state.setdefault("user_context", {})
-    
-    messages = [SystemMessage(content=SYSTEM_PROMPT)] + state["messages"]
-    response = llm_with_tools.invoke(messages)
-    return {"messages": [response]}
-
-
-# Build graph: supervisor ─┬─(tool_calls)──► tools ──► supervisor
-#                           └─(no tools)───► END
-builder = StateGraph(AgentState)
-builder.add_node("supervisor_node", supervisor_node)
-builder.add_node("tools", ToolNode(ALL_TOOLS))
-
-builder.set_entry_point("supervisor_node")
-builder.add_conditional_edges("supervisor_node", tools_condition)
-builder.add_edge("tools", "supervisor_node")
-
-graph = builder.compile()
+    clean_messages = prepare_messages_for_agent(state["messages"], keep_all_system_msgs=True)
+    response = safe_invoke(_llm_with_tools, [SystemMessage(content=_SYSTEM_PROMPT)] + clean_messages, logger)
+    # Strip any text alongside the handover call — supervisor must stay silent
+    if response.tool_calls and any(tc["name"] in HANDOVER_NAMES for tc in response.tool_calls):
+        response = AIMessage(content="", tool_calls=response.tool_calls, id=response.id)
+    return {"messages": [response], "active_agent": "supervisor"}
