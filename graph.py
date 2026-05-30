@@ -12,7 +12,6 @@ from src.agents.tracker_agent import tracker_node
 from src.nodes.turn_entry import turn_entry_node
 from src.nodes.handle_handover import handle_handover, parse_handover
 from src.tools.handover_tool import HANDOVER_NAMES
-from src.configs.memory_config import get_memory
 
 
 def _route_after_agent(state: AgentState) -> str:
@@ -75,5 +74,5 @@ def create_graph(checkpointer=None):
     return builder.compile(checkpointer=checkpointer)
 
 
-graph = create_graph(checkpointer=get_memory())
+graph = create_graph()
 __all__ = ["graph"]

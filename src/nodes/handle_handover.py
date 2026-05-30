@@ -11,8 +11,7 @@ from typing import NamedTuple
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.types import Command
-
-from src.commons.constants import CONVERSATION, SUPERVISOR, AGENT_DESCRIPTIONS
+from src.commons.constants import CONVERSATION,SUPERVISOR,AGENT_DESCRIPTIONS
 from src.configs.logging_config import get_logger
 from src.states.states import AgentState
 from src.tools.handover_tool import HANDOVER_NAMES
