@@ -2,15 +2,17 @@
 
 from langchain_core.messages import SystemMessage
 
+from src.commons.constants import CONVERSATION
 from src.configs.logging_config import get_logger
 from src.states.states import AgentState
 from src.llm_config import llm
-from src.tools.handover_tool import handover
 from src.utils.message_utils import prepare_messages_for_agent, safe_invoke
 
 logger = get_logger(__name__)
 
-_SYSTEM_PROMPT = """\
+
+def _build_prompt(state: AgentState) -> str:
+    return """\
 You are an intelligent AI assistant with access to webcam vision, system tools, and web search.
 
 Capabilities:
@@ -32,5 +34,5 @@ def conversation_node(state: AgentState):
     from src.tools import CONVERSATION_TOOLS
     llm_with_tools = llm.bind_tools(CONVERSATION_TOOLS)
     clean_messages = prepare_messages_for_agent(state["messages"])
-    response = safe_invoke(llm_with_tools, [SystemMessage(content=_SYSTEM_PROMPT)] + clean_messages, logger)
-    return {"messages": [response], "active_agent": "conversation"}
+    response = safe_invoke(llm_with_tools, [SystemMessage(content=_build_prompt(state))] + clean_messages, logger)
+    return {"messages": [response], "active_agent": CONVERSATION}
