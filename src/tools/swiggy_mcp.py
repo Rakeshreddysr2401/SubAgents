@@ -28,14 +28,17 @@ async def _fetch_food_tools() -> list:
 
 def _load_sync() -> list:
     try:
-        try:
-            asyncio.get_running_loop()
-            # Already inside a running loop (e.g. LangGraph hot-reload).
-            # Run in a separate thread to avoid "This event loop is already running".
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    try:
+        if loop is not None and loop.is_running():
+            # Inside a running event loop (e.g. LangGraph hot-reload) — use a thread.
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 return pool.submit(asyncio.run, _fetch_food_tools()).result()
-        except RuntimeError:
+        else:
             return asyncio.run(_fetch_food_tools())
     except Exception as e:
         logger.warning("Swiggy Food MCP unavailable — tools disabled: %s", e)

@@ -7,6 +7,7 @@ Decision logic:
 """
 
 import json
+import os
 from typing import NamedTuple
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -18,7 +19,7 @@ from src.tools.handover_tool import HANDOVER_NAMES
 
 logger = get_logger(__name__)
 
-_MAX_VISITS_PER_AGENT = 3
+_MAX_VISITS_PER_AGENT = int(os.getenv("MAX_AGENT_VISITS", "3"))
 
 
 # ---------------------------------------------------------------------------
