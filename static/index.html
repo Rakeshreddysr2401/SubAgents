@@ -571,6 +571,40 @@
       40% { transform: scale(1); opacity: 1; }
     }
 
+    /* ── Thinking (LLM reasoning) — animated multi-color bubble ── */
+    .message.bot .bubble.thinking-active {
+      background: linear-gradient(120deg,
+        #6366f1, #8b5cf6, #ec4899, #f59e0b, #10b981, #22d3ee, #6366f1);
+      background-size: 300% 100%;
+      animation: thinking-flow 4s linear infinite;
+      border: none;
+      color: #fff;
+      box-shadow: 0 6px 20px rgba(99,102,241,0.28);
+    }
+    @keyframes thinking-flow {
+      0%   { background-position: 0% 50%; }
+      100% { background-position: 300% 50%; }
+    }
+    .thinking-label {
+      display: flex; align-items: center; gap: 9px;
+      font-size: 13px; font-weight: 600; color: #fff;
+      letter-spacing: 0.2px; padding: 1px 0;
+    }
+    .thinking-label .tdots { display: inline-flex; gap: 4px; }
+    .thinking-label .tdots span {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: rgba(255,255,255,0.95);
+      animation: bounce 1.4s infinite ease-in-out;
+    }
+    .thinking-label .tdots span:nth-child(2) { animation-delay: 0.16s; }
+    .thinking-label .tdots span:nth-child(3) { animation-delay: 0.32s; }
+
+    /* Honor reduced-motion: keep colors, drop the animation */
+    @media (prefers-reduced-motion: reduce) {
+      .message.bot .bubble.thinking-active,
+      .thinking-label .tdots span { animation: none; }
+    }
+
     /* ── Input ── */
     .input-area {
       padding: 14px 20px 16px;
@@ -1109,19 +1143,18 @@
       avatar.className = "avatar";
       avatar.textContent = "S";
       const bubble = document.createElement("div");
-      bubble.className = "bubble";
+      bubble.className = "bubble thinking-active";   // animated multi-color while reasoning
       const mdDiv = document.createElement("div");
       mdDiv.className = "md-content";
       bubble.appendChild(mdDiv);
       botMsgDiv.appendChild(avatar);
       botMsgDiv.appendChild(bubble);
-      
-      // Add typing indicator while waiting for first chunk
-      const typing = document.createElement("div");
-      typing.className = "typing";
-      typing.innerHTML = "<span></span><span></span><span></span>";
-      mdDiv.appendChild(typing);
-      
+
+      // "Thinking…" state shown until the first token streams in
+      mdDiv.innerHTML =
+        '<div class="thinking-label">Thinking' +
+        '<span class="tdots"><span></span><span></span><span></span></span></div>';
+
       chatContainer.appendChild(botMsgDiv);
       scrollToBottom();
 
@@ -1146,9 +1179,8 @@
         const decoder = new TextDecoder();
         let sseBuffer = "";
 
-        // Remove typing indicator once stream starts
-        mdDiv.innerHTML = "";
-
+        // Keep the animated "Thinking…" bubble until the first real token
+        // arrives (headers come back before the model starts generating).
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
@@ -1197,6 +1229,10 @@
           }
 
           if (chunkText) {
+            // First token: leave the "Thinking…" state, revert to a normal bubble
+            if (bubble.classList.contains("thinking-active")) {
+              bubble.classList.remove("thinking-active");
+            }
             fullText += chunkText;
             mdDiv.innerHTML = renderMarkdown(fullText);
             scrollToBottom();
@@ -1210,6 +1246,7 @@
         mdDiv.innerHTML = `<div style="color: #ef4444; font-weight: 500;">Error: ${err.message}</div>`;
         showError(err.message);
       } finally {
+        bubble.classList.remove("thinking-active");  // always clean up (errors / empty replies)
         sending = false; sendBtn.disabled = false; chatInput.focus();
       }
     }
