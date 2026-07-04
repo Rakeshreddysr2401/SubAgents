@@ -3,6 +3,10 @@
 GET  /events         SSE stream the browser subscribes to
 POST /trigger_voice  called by wake_word.py to wake the UI mic
 GET  /health
+
+Events fan out to *every* connected subscriber (each gets its own queue), so a
+trigger reaches all open tabs and is never swallowed by a single stale
+connection. The registry lives on app.state.event_subscribers.
 """
 
 import asyncio
@@ -13,27 +17,37 @@ from sse_starlette.sse import EventSourceResponse
 router = APIRouter()
 
 
+def _subscribers(request: Request) -> set:
+    return request.app.state.event_subscribers
+
+
 @router.get("/events")
 async def events(request: Request):
-    queue: asyncio.Queue = request.app.state.event_queue
+    queue: asyncio.Queue = asyncio.Queue()
+    _subscribers(request).add(queue)
 
     async def event_generator():
-        while True:
-            if await request.is_disconnected():
-                break
-            try:
-                data = await asyncio.wait_for(queue.get(), timeout=5.0)
-                yield {"data": data}
-            except asyncio.TimeoutError:
-                yield {"comment": "heartbeat"}
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=5.0)
+                    yield {"data": data}
+                except asyncio.TimeoutError:
+                    yield {"comment": "heartbeat"}
+        finally:
+            _subscribers(request).discard(queue)
 
     return EventSourceResponse(event_generator())
 
 
 @router.post("/trigger_voice")
 async def trigger_voice(request: Request):
-    await request.app.state.event_queue.put("start_voice")
-    return {"status": "triggered"}
+    subscribers = _subscribers(request)
+    for queue in list(subscribers):
+        queue.put_nowait("start_voice")
+    return {"status": "triggered", "subscribers": len(subscribers)}
 
 
 @router.get("/health")

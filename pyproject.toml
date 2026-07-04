@@ -39,6 +39,10 @@ clip = [
     "torch>=2.0.0",
     "open-clip-torch>=2.24.0",
 ]
+wake = [
+    "openwakeword>=0.6.0",
+    "sounddevice>=0.5.5",
+]
 
 [dependency-groups]
 dev = [

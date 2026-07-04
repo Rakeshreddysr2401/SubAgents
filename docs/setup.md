@@ -64,12 +64,28 @@ bearer token when `AUTH_DISABLED=true` (the default); it is not verified in dev.
 
 ## 5. Optional: wake word
 
+Instead of clicking the mic, say a wake word to activate it. The listener runs
+as a separate process and `POST`s to `/trigger_voice`, which wakes the browser
+mic via the `/events` SSE channel (the UI tab must be open).
+
 ```bash
-uv run python wake_word.py
+uv sync --extra wake            # installs the offline openWakeWord engine
+uv run python wake_word.py      # downloads models on first run, then listens
 ```
 
-Listens on the mic and `POST`s to `/trigger_voice`, which wakes the browser mic
-via the `/events` SSE channel.
+Configure in `.env`:
+
+```
+WAKE_WORD_ENGINE=openwakeword   # offline, no API key, no audio leaves the machine
+WAKE_WORD=hey_jarvis            # built-in: hey_jarvis | alexa | hey_mycroft | hey_rhasspy
+WAKE_WORD_THRESHOLD=0.5         # raise toward 1.0 if it triggers too easily
+```
+
+- **Custom phrase**: openWakeWord's built-ins are the four above. For an
+  arbitrary phrase, train a model (see the openWakeWord docs) and set
+  `WAKE_WORD=/path/to/model.onnx`.
+- **Online alternative**: `WAKE_WORD_ENGINE=google` matches any spoken phrase in
+  `WAKE_WORD` but sends audio to Google and needs `SpeechRecognition` + `PyAudio`.
 
 ## Tests
 

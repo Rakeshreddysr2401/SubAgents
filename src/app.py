@@ -6,7 +6,6 @@ The lifespan owns every long-lived resource: the Postgres checkpointer,
 Redis and Qdrant clients, Swiggy MCP tools, and the compiled LangGraph graph.
 """
 
-import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -66,7 +65,8 @@ async def lifespan(app: FastAPI):
         from src.graph.build import build_graph
 
         app.state.graph = build_graph(checkpointer=checkpointer, mem0=app.state.mem0)
-        app.state.event_queue = asyncio.Queue()
+        # Wake-word event fan-out: one queue per connected /events subscriber
+        app.state.event_subscribers = set()
 
         logger.info("SubAgents started — standalone runtime, multimodal mode active")
         try:

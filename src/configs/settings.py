@@ -85,6 +85,20 @@ class Settings(BaseSettings):
     chat_timeout_seconds: int = Field(120, alias="CHAT_TIMEOUT_SECONDS")
     rate_limit_per_minute: int = Field(20, alias="RATE_LIMIT_PER_MINUTE")
 
+    # --- Wake word (wake_word.py listener) ---
+    wake_word_engine: Literal["openwakeword", "google"] = Field(
+        "openwakeword", alias="WAKE_WORD_ENGINE"
+    )
+    # openwakeword: a built-in model name (hey_jarvis, alexa, hey_mycroft,
+    # hey_rhasspy) or a path to a custom .onnx/.tflite model.
+    # google: the phrase to substring-match.
+    wake_word: str = Field("hey_jarvis", alias="WAKE_WORD")
+    wake_word_threshold: float = Field(0.5, alias="WAKE_WORD_THRESHOLD")
+    wake_word_cooldown_seconds: float = Field(2.0, alias="WAKE_WORD_COOLDOWN_SECONDS")
+    trigger_voice_url: str = Field(
+        "http://localhost:2024/trigger_voice", alias="TRIGGER_VOICE_URL"
+    )
+
     # --- External services ---
     tavily_api_key: str = Field("", alias="TAVILY_API_KEY")
     swiggy_food_mcp_url: str = Field("https://mcp.swiggy.com/food", alias="SWIGGY_FOOD_MCP_URL")
