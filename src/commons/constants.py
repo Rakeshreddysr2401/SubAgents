@@ -1,9 +1,8 @@
-SUPERVISOR = "supervisor"
 CONVERSATION = "conversation"
 SWIGGY = "swiggy"
 TRACKER = "tracker"
 
-SUB_AGENTS = {CONVERSATION, SWIGGY, TRACKER}
+AGENTS = {CONVERSATION, SWIGGY, TRACKER}
 
 AGENT_DESCRIPTIONS = {
     CONVERSATION: "general conversation, web search, system info, and visual/webcam tasks",

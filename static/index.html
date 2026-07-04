@@ -1137,6 +1137,7 @@
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
+        let sseBuffer = "";
 
         // Remove typing indicator once stream starts
         mdDiv.innerHTML = "";
@@ -1145,8 +1146,12 @@
           const { value, done } = await reader.read();
           if (done) break;
 
-          const chunk = decoder.decode(value);
-          const lines = chunk.split("\n");
+          // Buffer partial lines: only process up to the last newline
+          sseBuffer += decoder.decode(value, { stream: true });
+          const lastNewline = sseBuffer.lastIndexOf("\n");
+          if (lastNewline === -1) continue;
+          const lines = sseBuffer.slice(0, lastNewline).split("\n");
+          sseBuffer = sseBuffer.slice(lastNewline + 1);
 
           let chunkText = "";
           for (const line of lines) {
@@ -1173,7 +1178,11 @@
                 continue;
               }
 
-              if (parsed.text) {
+              if (parsed.delta) {
+                // Token stream: append raw, no separator
+                chunkText += parsed.delta;
+              } else if (parsed.text) {
+                // Legacy full-text events
                 if (chunkText !== "") chunkText += "\n";
                 chunkText += parsed.text;
               }

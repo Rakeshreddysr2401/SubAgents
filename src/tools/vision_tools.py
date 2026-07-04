@@ -3,13 +3,13 @@
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
-from src.utils.frame_buffer import get_latest_frame
+from src.services.frame_buffer import get_latest_frame
 from src.configs.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 @tool
-def capture_webcam(config: RunnableConfig) -> list:
+async def capture_webcam(config: RunnableConfig) -> list:
     """Capture the latest frame from the user's webcam.
 
     Use this tool whenever you need to see what is happening in the user's environment,
@@ -20,7 +20,7 @@ def capture_webcam(config: RunnableConfig) -> list:
     """
     thread_id = config.get("configurable", {}).get("thread_id", "default")
 
-    b64_frame = get_latest_frame(thread_id)
+    b64_frame = await get_latest_frame(thread_id)
     if not b64_frame:
         return [
             {"type": "text", "text": "No camera frame available. Make sure the camera is enabled and streaming."}

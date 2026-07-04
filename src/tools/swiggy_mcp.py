@@ -1,24 +1,32 @@
-import os
+"""Swiggy Food MCP tool loading.
+
+`load_swiggy_tools()` is the canonical async entry point — called from the
+FastAPI lifespan. It degrades gracefully: any failure (network, auth, timeout)
+returns [] and logs a warning so the app always starts.
+
+"""
+
 import asyncio
 import logging
+
 from langchain_mcp_adapters.client import MultiServerMCPClient
+
+from src.configs.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-_FOOD_MCP_URL = os.getenv("SWIGGY_FOOD_MCP_URL", "https://mcp.swiggy.com/food")
-_ACCESS_TOKEN = os.getenv("SWIGGY_ACCESS_TOKEN", "")
-
 
 async def _fetch_food_tools() -> list:
+    s = get_settings()
     headers = {}
-    if _ACCESS_TOKEN:
-        headers["Authorization"] = f"Bearer {_ACCESS_TOKEN}"
+    if s.swiggy_access_token:
+        headers["Authorization"] = f"Bearer {s.swiggy_access_token}"
 
     client = MultiServerMCPClient(
         {
             "swiggy_food": {
                 "transport": "streamable_http",
-                "url": _FOOD_MCP_URL,
+                "url": s.swiggy_food_mcp_url,
                 "headers": headers,
             }
         }
@@ -26,23 +34,16 @@ async def _fetch_food_tools() -> list:
     return await client.get_tools()
 
 
-def _load_sync() -> list:
+async def load_swiggy_tools(timeout: float | None = None) -> list:
+    """Load Swiggy Food MCP tools, returning [] on any failure."""
+    if timeout is None:
+        timeout = get_settings().mcp_load_timeout_seconds
     try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    try:
-        if loop is not None and loop.is_running():
-            # Inside a running event loop (e.g. LangGraph hot-reload) — use a thread.
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(asyncio.run, _fetch_food_tools()).result()
-        else:
-            return asyncio.run(_fetch_food_tools())
+        tools = await asyncio.wait_for(_fetch_food_tools(), timeout=timeout)
+        logger.info("Loaded %d Swiggy Food MCP tools", len(tools))
+        return tools
     except Exception as e:
         logger.warning("Swiggy Food MCP unavailable — tools disabled: %s", e)
         return []
 
 
-SWIGGY_FOOD_TOOLS: list = _load_sync()

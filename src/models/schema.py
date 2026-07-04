@@ -24,3 +24,9 @@ class ChatResponse(BaseModel):
         default_factory=list,
         description="Full conversation history for this thread",
     )
+
+
+class UploadResponse(BaseModel):
+    doc_id: str | None
+    filename: str
+    chunks: int
