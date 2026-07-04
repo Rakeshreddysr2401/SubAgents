@@ -64,12 +64,24 @@ bearer token when `AUTH_DISABLED=true` (the default); it is not verified in dev.
 
 ## 5. Optional: wake word
 
-Instead of clicking the mic, say a wake word to activate it. The listener runs
-as a separate process and `POST`s to `/trigger_voice`, which wakes the browser
-mic via the `/events` SSE channel (the UI tab must be open).
+Instead of clicking the mic, say a wake word to activate it. The wake word wakes
+the browser mic via the `/events` SSE channel (a UI tab must be open).
 
 ```bash
 uv sync --extra wake            # installs the offline openWakeWord engine
+```
+
+**Single command (recommended for one machine)** — run the listener inside the
+server. Set `WAKE_WORD_ENABLED=true` in `.env`, then just:
+
+```bash
+uv run uvicorn main:app --port 2024
+```
+
+**Separate process** — run the listener on its own (e.g. mic on a different
+machine than the server). Leave `WAKE_WORD_ENABLED=false` and run:
+
+```bash
 uv run python wake_word.py      # downloads models on first run, then listens
 ```
 

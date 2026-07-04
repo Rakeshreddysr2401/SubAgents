@@ -68,13 +68,56 @@ async def lifespan(app: FastAPI):
         # Wake-word event fan-out: one queue per connected /events subscriber
         app.state.event_subscribers = set()
 
+        # Optional in-process wake-word listener (single-command mode)
+        wake_stop = _maybe_start_wake_word(app, settings)
+
         logger.info("SubAgents started — standalone runtime, multimodal mode active")
         try:
             yield
         finally:
+            if wake_stop is not None:
+                wake_stop.set()
             await close_redis()
             await app.state.qdrant.close()
             logger.info("SubAgents stopped")
+
+
+def _maybe_start_wake_word(app: FastAPI, settings):
+    """Start the wake-word detector in a background thread if enabled.
+
+    Returns the threading.Event used to stop it, or None if disabled/unavailable.
+    On detection the audio thread hands the event back to the loop via
+    call_soon_threadsafe, then fans it out to /events subscribers.
+    """
+    if not settings.wake_word_enabled:
+        return None
+
+    import asyncio
+    import threading
+
+    try:
+        from src.api.events import broadcast_event
+        from src.services.wake_word import run_listener
+    except Exception as e:  # pragma: no cover - optional deps
+        logger.warning("Wake word enabled but unavailable: %s", e)
+        return None
+
+    loop = asyncio.get_running_loop()
+    stop_event = threading.Event()
+
+    def on_detect():
+        loop.call_soon_threadsafe(broadcast_event, app, "start_voice")
+
+    def target():
+        try:
+            run_listener(settings, on_detect, stop_event)
+        except Exception as e:
+            logger.warning("Wake-word listener stopped: %s", e)
+
+    threading.Thread(target=target, name="wake-word", daemon=True).start()
+    logger.info("In-process wake-word listener enabled (engine=%s, word=%s)",
+                settings.wake_word_engine, settings.wake_word)
+    return stop_event
 
 
 def create_app() -> FastAPI:

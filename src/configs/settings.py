@@ -85,7 +85,10 @@ class Settings(BaseSettings):
     chat_timeout_seconds: int = Field(120, alias="CHAT_TIMEOUT_SECONDS")
     rate_limit_per_minute: int = Field(20, alias="RATE_LIMIT_PER_MINUTE")
 
-    # --- Wake word (wake_word.py listener) ---
+    # --- Wake word ---
+    # Run the listener inside the server process (single command) vs. only via
+    # the standalone `uv run python wake_word.py` script.
+    wake_word_enabled: bool = Field(False, alias="WAKE_WORD_ENABLED")
     wake_word_engine: Literal["openwakeword", "google"] = Field(
         "openwakeword", alias="WAKE_WORD_ENGINE"
     )

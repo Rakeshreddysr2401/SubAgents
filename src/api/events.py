@@ -21,6 +21,17 @@ def _subscribers(request: Request) -> set:
     return request.app.state.event_subscribers
 
 
+def broadcast_event(app, data: str) -> int:
+    """Fan out an event to every connected /events subscriber. Returns the count.
+
+    Must be called on the app's event loop (use loop.call_soon_threadsafe from
+    other threads, e.g. the in-process wake-word listener)."""
+    subscribers = app.state.event_subscribers
+    for queue in list(subscribers):
+        queue.put_nowait(data)
+    return len(subscribers)
+
+
 @router.get("/events")
 async def events(request: Request):
     queue: asyncio.Queue = asyncio.Queue()
@@ -44,10 +55,8 @@ async def events(request: Request):
 
 @router.post("/trigger_voice")
 async def trigger_voice(request: Request):
-    subscribers = _subscribers(request)
-    for queue in list(subscribers):
-        queue.put_nowait("start_voice")
-    return {"status": "triggered", "subscribers": len(subscribers)}
+    count = broadcast_event(request.app, "start_voice")
+    return {"status": "triggered", "subscribers": count}
 
 
 @router.get("/health")
