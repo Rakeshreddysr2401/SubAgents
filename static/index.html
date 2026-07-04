@@ -834,7 +834,10 @@
   <script>
     marked.setOptions({ breaks: true, gfm: true });
 
-    let threadId = null;
+    // Assign a real thread id up front so the camera frame WS and /chat share
+    // the same thread from the very first message (avoids the "pending" race
+    // where early frames land under a thread the chat never uses).
+    let threadId = crypto.randomUUID();
     let sending = false;
     const API_BASE = window.location.origin;
 
@@ -844,6 +847,9 @@
     const threadDisplay = document.getElementById("threadDisplay");
     const welcomeMsg    = document.getElementById("welcomeMsg");
     const tokenInput    = document.getElementById("tokenInput");
+
+    threadDisplay.textContent = threadId.slice(0, 8) + "...";
+    threadDisplay.title = threadId;
 
     tokenInput.value = localStorage.getItem("owp_token") || "";
     tokenInput.addEventListener("change", () => localStorage.setItem("owp_token", tokenInput.value));
@@ -862,13 +868,14 @@
     }
 
     function newThread() {
-      threadId = null;
-      threadDisplay.textContent = "No thread";
+      threadId = crypto.randomUUID();
+      threadDisplay.textContent = threadId.slice(0, 8) + "...";
+      threadDisplay.title = threadId;
       chatContainer.innerHTML = "";
       chatContainer.appendChild(welcomeMsg);
       welcomeMsg.style.display = "";
       chatInput.focus();
-      if (cameraActive) reconnectFrameWS();
+      if (cameraActive) reconnectFrameWS();  // frames follow the new thread
     }
 
     function renderMarkdown(text) {
