@@ -105,8 +105,12 @@ def _maybe_start_wake_word(app: FastAPI, settings):
     loop = asyncio.get_running_loop()
     stop_event = threading.Event()
 
+    def _fire():
+        n = broadcast_event(app, "start_voice")
+        logger.info(">>> Wake word detected — notified %d browser subscriber(s)", n)
+
     def on_detect():
-        loop.call_soon_threadsafe(broadcast_event, app, "start_voice")
+        loop.call_soon_threadsafe(_fire)
 
     def target():
         try:
