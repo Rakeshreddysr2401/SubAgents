@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     auth_disabled: bool = Field(True, alias="AUTH_DISABLED")
     jwt_secret: str = Field("change-me-in-production", alias="JWT_SECRET")
     jwt_algorithm: str = Field("HS256", alias="JWT_ALGORITHM")
+    access_token_ttl_minutes: int = Field(15, alias="ACCESS_TOKEN_TTL_MINUTES")
+    refresh_token_ttl_days: int = Field(7, alias="REFRESH_TOKEN_TTL_DAYS")
+    # Cookies need Secure=false to work over plain http in local dev; set true in prod (https).
+    cookie_secure: bool = Field(False, alias="COOKIE_SECURE")
 
     # --- Agents / runtime ---
     max_agent_visits: int = Field(3, alias="MAX_AGENT_VISITS")

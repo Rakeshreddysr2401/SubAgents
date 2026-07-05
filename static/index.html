@@ -111,51 +111,123 @@
       transform: translateY(-1px);
     }
 
-    /* ── Settings bar ── */
-    .settings-bar {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 24px;
-      background: var(--surface);
-      border-bottom: 1px solid var(--border-light);
+    /* ── User menu ── */
+    .user-menu { position: relative; }
+    .user-avatar-btn {
+      display: flex; align-items: center; gap: 8px;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 20px;
+      padding: 4px 12px 4px 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .user-avatar-btn:hover { background: rgba(255,255,255,0.22); }
+    .user-avatar-btn .avatar-circle {
+      width: 24px; height: 24px; border-radius: 50%;
+      background: #fff; color: var(--primary);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 800;
       flex-shrink: 0;
     }
-    .settings-bar label {
-      font-size: 11px;
-      color: var(--text-muted);
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+    .user-avatar-btn .user-email {
+      font-size: 12px; font-weight: 600; color: #fff;
+      max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .settings-bar input {
-      background: var(--bg);
-      border: 1.5px solid var(--border);
-      color: var(--text);
-      padding: 5px 12px;
-      border-radius: 8px;
-      font-size: 12px;
-      font-family: 'Cascadia Code', monospace;
-      width: 300px;
-      transition: border-color 0.2s, box-shadow 0.2s;
-    }
-    .settings-bar input:focus {
-      outline: none;
-      border-color: var(--primary);
-      box-shadow: 0 0 0 3px var(--primary-glow);
-    }
-    .settings-bar .btn-tiny {
-      padding: 4px 12px;
-      border: 1.5px solid var(--border);
-      border-radius: 7px;
+    .user-dropdown {
+      display: none;
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      min-width: 190px;
       background: var(--surface);
-      color: var(--text-secondary);
-      font-size: 11px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.15s;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-lg);
+      overflow: hidden;
+      z-index: 30;
     }
-    .settings-bar .btn-tiny:hover { background: var(--bg); border-color: var(--primary); color: var(--primary); }
+    .user-dropdown.open { display: block; }
+    .user-dropdown-email {
+      padding: 12px 14px;
+      font-size: 12px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border-light);
+      word-break: break-all;
+    }
+    .user-dropdown-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 14px;
+      font-size: 13px; font-weight: 500;
+      color: var(--text);
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .user-dropdown-item:hover { background: var(--bg); }
+    .user-dropdown-item svg { width: 15px; height: 15px; color: var(--text-secondary); }
+    .user-dropdown-item.danger { color: #dc2626; }
+    .user-dropdown-item.danger svg { color: #dc2626; }
+
+    /* ── History sidebar ── */
+    .history-sidebar {
+      width: 240px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      background: #fbfbfe;
+      border-right: 1px solid var(--border-light);
+      padding: 14px 12px;
+      gap: 10px;
+      overflow: hidden;
+    }
+    .new-chat-btn {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      color: var(--primary);
+      font-size: 12.5px; font-weight: 700;
+      padding: 10px 0;
+      border-radius: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+    .new-chat-btn:hover { background: var(--primary-light); border-color: var(--primary); }
+    .new-chat-btn svg { width: 15px; height: 15px; }
+
+    .thread-list {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .thread-list::-webkit-scrollbar { width: 4px; }
+    .thread-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .thread-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 9px 10px;
+      border-radius: 9px;
+      cursor: pointer;
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      transition: background 0.15s;
+      position: relative;
+    }
+    .thread-item:hover { background: var(--border-light); }
+    .thread-item.active { background: var(--primary-light); color: var(--primary); font-weight: 600; }
+    .thread-item .thread-title {
+      flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .thread-item .thread-delete {
+      opacity: 0; width: 20px; height: 20px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 6px; color: var(--text-muted);
+    }
+    .thread-item:hover .thread-delete { opacity: 1; }
+    .thread-item .thread-delete:hover { background: rgba(239,68,68,0.15); color: #dc2626; }
+    .thread-item .thread-delete svg { width: 13px; height: 13px; }
+    .thread-empty { font-size: 11.5px; color: var(--text-muted); text-align: center; padding: 20px 8px; }
 
     /* ── Main layout ── */
     .main-content {
@@ -710,6 +782,11 @@
     /* ── Responsive ── */
     @media (max-width: 900px) {
       .main-content { flex-direction: column; }
+      .history-sidebar {
+        width: 100%; height: auto; max-height: 160px;
+        border-right: none;
+        border-bottom: 1px solid var(--border-light);
+      }
       .left-panel {
         width: 100%; height: auto;
         flex-direction: row;
@@ -743,19 +820,39 @@
         <button id="voiceToggle" class="btn-tiny" style="width: 60px; padding: 2px 0;" onclick="toggleVoiceResponse()">OFF</button>
       </div>
       <span class="header-pill" id="threadDisplay">No thread</span>
-      <button class="header-btn" onclick="newThread()">+ New Chat</button>
+      <div class="user-menu" id="userMenu">
+        <button class="user-avatar-btn" onclick="toggleUserMenu()">
+          <span class="avatar-circle" id="userAvatarInitial">?</span>
+          <span class="user-email" id="userEmailLabel">…</span>
+        </button>
+        <div class="user-dropdown" id="userDropdown">
+          <div class="user-dropdown-email" id="userDropdownEmail"></div>
+          <div class="user-dropdown-item" onclick="window.location.href='/account'">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Account settings
+          </div>
+          <div class="user-dropdown-item danger" onclick="logout()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Log out
+          </div>
+        </div>
+      </div>
     </div>
-  </div>
-
-  <!-- Settings -->
-  <div class="settings-bar">
-    <label>Token:</label>
-    <input type="password" id="tokenInput" placeholder="Bearer token..." />
-    <button class="btn-tiny" onclick="toggleTokenVisibility(this)">Show</button>
   </div>
 
   <!-- Main -->
   <div class="main-content">
+
+    <!-- Chat history sidebar -->
+    <div class="history-sidebar">
+      <button class="new-chat-btn" onclick="newThread()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New chat
+      </button>
+      <div class="thread-list" id="threadList">
+        <div class="thread-empty">No conversations yet</div>
+      </div>
+    </div>
 
     <!-- Left panel -->
     <div class="left-panel">
@@ -884,13 +981,10 @@
     const sendBtn       = document.getElementById("sendBtn");
     const threadDisplay = document.getElementById("threadDisplay");
     const welcomeMsg    = document.getElementById("welcomeMsg");
-    const tokenInput    = document.getElementById("tokenInput");
+    const threadListEl  = document.getElementById("threadList");
 
     threadDisplay.textContent = threadId.slice(0, 8) + "...";
     threadDisplay.title = threadId;
-
-    tokenInput.value = localStorage.getItem("owp_token") || "";
-    tokenInput.addEventListener("change", () => localStorage.setItem("owp_token", tokenInput.value));
 
     chatInput.addEventListener("input", () => {
       chatInput.style.height = "auto";
@@ -900,9 +994,125 @@
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
     });
 
-    function toggleTokenVisibility(btn) {
-      tokenInput.type = tokenInput.type === "password" ? "text" : "password";
-      btn.textContent = tokenInput.type === "password" ? "Show" : "Hide";
+    // ── Auth: fetch with silent access-token refresh on 401 ──
+    async function authFetch(url, options = {}) {
+      const opts = { ...options, credentials: "include" };
+      let res = await fetch(url, opts);
+      if (res.status === 401) {
+        const refreshed = await fetch("/auth/refresh", { method: "POST", credentials: "include" });
+        if (refreshed.ok) {
+          res = await fetch(url, opts);
+        } else {
+          window.location.href = "/login";
+          throw new Error("Session expired");
+        }
+      }
+      return res;
+    }
+
+    // ── User menu ──
+    let currentUser = null;
+
+    async function loadCurrentUser() {
+      try {
+        const res = await fetch("/auth/me", { credentials: "include" });
+        if (!res.ok) { window.location.href = "/login"; return; }
+        currentUser = await res.json();
+        document.getElementById("userEmailLabel").textContent = currentUser.email;
+        document.getElementById("userDropdownEmail").textContent = currentUser.email;
+        document.getElementById("userAvatarInitial").textContent = currentUser.email[0].toUpperCase();
+      } catch {
+        window.location.href = "/login";
+      }
+    }
+
+    function toggleUserMenu() {
+      document.getElementById("userDropdown").classList.toggle("open");
+    }
+    document.addEventListener("click", (e) => {
+      const menu = document.getElementById("userMenu");
+      if (menu && !menu.contains(e.target)) document.getElementById("userDropdown").classList.remove("open");
+    });
+
+    async function logout() {
+      await fetch("/auth/logout", { method: "POST", credentials: "include" });
+      window.location.href = "/login";
+    }
+
+    // ── Chat history sidebar ──
+    function timeAgo(iso) {
+      const diffMs = Date.now() - new Date(iso).getTime();
+      const mins = Math.floor(diffMs / 60000);
+      if (mins < 1) return "just now";
+      if (mins < 60) return `${mins}m ago`;
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return `${hrs}h ago`;
+      return `${Math.floor(hrs / 24)}d ago`;
+    }
+
+    async function loadThreads() {
+      try {
+        const res = await authFetch("/threads");
+        if (!res.ok) return;
+        renderThreads(await res.json());
+      } catch { /* non-fatal */ }
+    }
+
+    function renderThreads(threads) {
+      threadListEl.innerHTML = "";
+      if (!threads.length) {
+        threadListEl.innerHTML = '<div class="thread-empty">No conversations yet</div>';
+        return;
+      }
+      for (const t of threads) {
+        const item = document.createElement("div");
+        item.className = "thread-item" + (t.id === threadId ? " active" : "");
+        item.title = `${t.title} · ${timeAgo(t.updated_at)}`;
+        item.onclick = () => selectThread(t.id);
+
+        const title = document.createElement("span");
+        title.className = "thread-title";
+        title.textContent = t.title;
+
+        const del = document.createElement("span");
+        del.className = "thread-delete";
+        del.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+        del.onclick = (e) => { e.stopPropagation(); deleteThread(t.id); };
+
+        item.appendChild(title);
+        item.appendChild(del);
+        threadListEl.appendChild(item);
+      }
+    }
+
+    async function deleteThread(id) {
+      await authFetch(`/threads/${id}`, { method: "DELETE" });
+      if (id === threadId) newThread();
+      loadThreads();
+    }
+
+    async function selectThread(id) {
+      if (id === threadId) return;
+      try {
+        const res = await authFetch(`/threads/${id}/messages`);
+        if (!res.ok) throw new Error("Could not load that conversation.");
+        const data = await res.json();
+        threadId = id;
+        threadDisplay.textContent = threadId.slice(0, 8) + "...";
+        threadDisplay.title = threadId;
+        chatContainer.innerHTML = "";
+        if (data.messages.length) {
+          welcomeMsg.style.display = "none";
+          for (const m of data.messages) addMessage(m.role === "human" ? "user" : "bot", m.content);
+        } else {
+          chatContainer.appendChild(welcomeMsg);
+          welcomeMsg.style.display = "";
+        }
+        loadThreads();
+        if (cameraActive) reconnectFrameWS();
+      } catch (err) {
+        showError(err.message);
+      }
     }
 
     function newThread() {
@@ -913,6 +1123,7 @@
       chatContainer.appendChild(welcomeMsg);
       welcomeMsg.style.display = "";
       chatInput.focus();
+      loadThreads();
       if (cameraActive) reconnectFrameWS();  // frames follow the new thread
     }
 
@@ -1128,13 +1339,13 @@
       };
     }
     setupEventSource();
+    loadCurrentUser();
+    loadThreads();
 
     // ── Send message ──
     async function sendMessage() {
       const query = chatInput.value.trim();
       if (!query || sending) return;
-      const token = tokenInput.value.trim();
-      if (!token) { showError("Enter your Bearer token first."); tokenInput.focus(); return; }
 
       sending = true; sendBtn.disabled = true;
       chatInput.value = ""; chatInput.style.height = "auto";
@@ -1167,10 +1378,10 @@
       try {
         const url = new URL("/chat", API_BASE);
         if (threadId) url.searchParams.set("thread_id", threadId);
-        
-        const response = await fetch(url.toString(), {
+
+        const response = await authFetch(url.toString(), {
           method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query, always_speak: alwaysSpeak }),
         });
 
@@ -1245,6 +1456,7 @@
 
         // Add copy buttons to the finished message
         addCopyButtons(mdDiv);
+        loadThreads();
 
       } catch (err) {
         mdDiv.innerHTML = `<div style="color: #ef4444; font-weight: 500;">Error: ${err.message}</div>`;

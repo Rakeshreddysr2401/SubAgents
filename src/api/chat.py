@@ -26,6 +26,8 @@ from src.models.schema import ChatRequest
 from src.services.rate_limit import enforce_rate_limit
 from src.tools.audio_tools import speak_out_loud
 
+FIRST_MESSAGE_MAX_CHARS = 500
+
 logger = get_logger(__name__)
 router = APIRouter()
 
@@ -99,6 +101,7 @@ async def chat(
     await enforce_rate_limit("chat", user_id)
     tid = validate_thread_id(thread_id or str(uuid4()))
     graph = request.app.state.graph
+    await request.app.state.thread_store.touch(tid, user_id, req.query[:FIRST_MESSAGE_MAX_CHARS])
     config = {"configurable": {"thread_id": tid, "user_id": user_id}}
     inputs = {
         "messages": [HumanMessage(content=req.query)],
@@ -150,19 +153,16 @@ async def chat(
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-@router.get("/history/{thread_id}")
-async def get_history(thread_id: str, request: Request):
-    """Conversation history straight from the in-process graph state."""
-    tid = validate_thread_id(thread_id)
-    graph = request.app.state.graph
+async def read_graph_messages(graph, thread_id: str) -> list[dict]:
+    """Extract the {role, content} turn history from the graph's checkpoint state."""
     try:
-        snapshot = await graph.aget_state({"configurable": {"thread_id": tid}})
+        snapshot = await graph.aget_state({"configurable": {"thread_id": thread_id}})
     except Exception:
-        raise HTTPException(status_code=404, detail="Thread not found")
+        return []
 
     values = snapshot.values if snapshot else None
     if not values:
-        raise HTTPException(status_code=404, detail="Thread not found")
+        return []
 
     history = []
     for msg in values.get("messages", []):
@@ -170,4 +170,21 @@ async def get_history(thread_id: str, request: Request):
         content = getattr(msg, "content", "")
         if role in ("human", "ai") and content and isinstance(content, str):
             history.append({"role": role, "content": content})
-    return {"thread_id": tid, "messages": history}
+    return history
+
+
+@router.get("/history/{thread_id}")
+async def get_history(thread_id: str, request: Request, user_id: str = Depends(get_user_id)):
+    """Conversation history straight from the in-process graph state.
+
+    Gated to the thread's owner via chat_threads metadata.
+    """
+    tid = validate_thread_id(thread_id)
+    thread = await request.app.state.thread_store.get(tid)
+    if thread is None or thread.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    messages = await read_graph_messages(request.app.state.graph, tid)
+    if not messages:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return {"thread_id": tid, "messages": messages}

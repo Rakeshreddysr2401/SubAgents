@@ -14,10 +14,13 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-from src.api import chat, events, frames, uploads
+from src.api import auth, chat, events, frames, threads, uploads
 from src.configs.logging_config import get_logger, setup_logging
 from src.configs.settings import get_settings
+from src.services.db import ensure_schema, make_pool
 from src.services.redis_client import close_redis, get_redis
+from src.services.thread_store import PostgresThreadStore
+from src.services.user_store import PostgresUserStore
 
 logger = get_logger(__name__)
 
@@ -34,6 +37,12 @@ async def lifespan(app: FastAPI):
         logger.info("Postgres checkpointer ready (%s)", settings.postgres_dsn.split("@")[-1])
 
         app.state.redis = get_redis()  # shared module-level client (tools use it too)
+
+        # Relational app data: users + chat_threads (separate pool from the checkpointer)
+        app.state.db = await make_pool()
+        await ensure_schema(app.state.db)
+        app.state.user_store = PostgresUserStore(app.state.db)
+        app.state.thread_store = PostgresThreadStore(app.state.db)
 
         # Qdrant (shared module-level client so tools can reach it) + collections
         from src.rag.qdrant import ensure_collections, get_qdrant
@@ -79,6 +88,7 @@ async def lifespan(app: FastAPI):
                 wake_stop.set()
             await close_redis()
             await app.state.qdrant.close()
+            await app.state.db.close()
             logger.info("SubAgents stopped")
 
 
@@ -130,17 +140,30 @@ def create_app() -> FastAPI:
     if _STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
+    def _serve(name: str, fallback: str):
+        page = _STATIC_DIR / name
+        if page.exists():
+            return page.read_text(encoding="utf-8")
+        return fallback
+
     @app.get("/", response_class=HTMLResponse)
     async def chat_ui():
-        index = _STATIC_DIR / "index.html"
-        if index.exists():
-            return index.read_text(encoding="utf-8")
-        return "<h1>SubAgents API</h1><p>Chat UI not found. Add static/index.html</p>"
+        return _serve("index.html", "<h1>SubAgents API</h1><p>Chat UI not found. Add static/index.html</p>")
 
+    @app.get("/login", response_class=HTMLResponse)
+    async def login_page():
+        return _serve("login.html", "<h1>SubAgents</h1><p>Login page not found. Add static/login.html</p>")
+
+    @app.get("/account", response_class=HTMLResponse)
+    async def account_page():
+        return _serve("account.html", "<h1>SubAgents</h1><p>Account page not found. Add static/account.html</p>")
+
+    app.include_router(auth.router)
     app.include_router(chat.router)
     app.include_router(frames.router)
     app.include_router(events.router)
     app.include_router(uploads.router)
+    app.include_router(threads.router)
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
