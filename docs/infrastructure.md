@@ -7,8 +7,8 @@ host** (so webcam, `say`, and `open -a` keep working). See `docker-compose.yml`.
 
 | Service | Image | Port(s) | Volume | Purpose |
 |---|---|---|---|---|
-| postgres | `postgres:16-alpine` | 5432 | `pgdata` | LangGraph checkpoints (thread state) |
-| redis | `redis:7-alpine` (AOF) | 6379 | `redisdata` | frame buffer, web cache, rate limits |
+| postgres | `postgres:16-alpine` | 5432 | `pgdata` | LangGraph checkpoints + `users`/`chat_threads` |
+| redis | `redis:7-alpine` (AOF) | 6379 | `redisdata` | frame buffer, web cache, rate limits, refresh-token sessions |
 | qdrant | `qdrant/qdrant` | 6333 (HTTP), 6334 (gRPC) | `qdrantdata` | vector search (RAG + Mem0) |
 
 All three declare healthchecks; `docker compose ps` shows `healthy` when ready.
@@ -30,10 +30,18 @@ The Postgres user/password/db are set in `docker-compose.yml`
 ## Data lifecycle & backup
 
 - **Postgres** — checkpoint tables are created automatically on startup
-  (`AsyncPostgresSaver.setup()`). Back up with `pg_dump`. The open-source
-  checkpointer has no TTL; prune old threads yourself if needed.
+  (`AsyncPostgresSaver.setup()`); the `users` and `chat_threads` tables are
+  created the same way, idempotently, via `src/services/db.py::ensure_schema()`.
+  Back up all of it with `pg_dump` — `users`/`chat_threads` are the durable
+  account/session data, not just cache. The open-source checkpointer has no
+  TTL; prune old threads yourself if needed. Deleting a user cascades to their
+  `chat_threads` rows (`ON DELETE CASCADE`) but leaves the underlying
+  checkpoint rows in place (orphaned, harmless).
 - **Redis** — AOF persistence is on; keys are ephemeral by design (frames
-  expire via TTL, caches via TTL, rate-limit buckets after 60s).
+  expire via TTL, caches via TTL, rate-limit buckets after 60s, refresh-token
+  sessions after `REFRESH_TOKEN_TTL_DAYS`). Losing Redis mid-session forces
+  every logged-in user to sign in again — Postgres remains the source of truth
+  for accounts and conversations.
 - **Qdrant** — collections live in the `qdrantdata` volume. Back up by snapshotting
   the volume or via Qdrant's snapshot API.
 

@@ -25,7 +25,11 @@ and retrieval-augmented reasoning.
 - **Multimodal perception** — live webcam vision (`capture_webcam`) with frames
   buffered in Redis with a TTL.
 - **Durable persistence** — Postgres checkpointer; state survives restarts.
-- **Auth & rate limiting** — JWT `user_id` scoping; per-user rate limits.
+- **Real accounts & sessions** — signup/login pages, httpOnly-cookie JWT
+  sessions with rotating refresh tokens, per-user conversation history sidebar,
+  and an account settings page (change password / delete account).
+- **Rate limiting** — per-user limits on `/chat`/`/upload`; brute-force limits
+  on `/auth/login`/`/auth/signup`.
 - **Local-first** — runs entirely on local models (Ollama/llama.cpp) or OpenAI.
 
 ---
@@ -39,7 +43,9 @@ cp .env.example .env               # configure LLM + embedding providers
 uv run uvicorn main:app --port 2024
 ```
 
-Open <http://localhost:2024>. Full setup (LLM/embedding options, wake word) is in
+Open <http://localhost:2024>. With `AUTH_DISABLED=true` (the dev default) you
+land straight in the chat UI; set it to `false` to require real signup/login.
+Full setup (LLM/embedding options, auth, wake word) is in
 **[docs/setup.md](docs/setup.md)**.
 
 ---
@@ -48,6 +54,7 @@ Open <http://localhost:2024>. Full setup (LLM/embedding options, wake word) is i
 
 ```
 Browser SPA ── POST /chat (SSE) · WS /ws/frames · GET /events · POST /upload
+            ── /auth/* (signup, login, refresh, logout, account) · /threads/*
    ▼
 FastAPI (host, :2024)   main.py → src/app.py   [lifespan owns all resources]
    ▼
@@ -81,15 +88,17 @@ main.py                  # uvicorn entry
 docker-compose.yml       # postgres, redis, qdrant
 src/
 ├── app.py               # FastAPI factory + lifespan (owns all resources)
-├── api/                 # chat (SSE), frames (WS), uploads, events, auth, deps
+├── api/                 # chat (SSE), frames (WS), uploads, events, auth, threads, deps
 ├── graph/               # swarm, guarded handoffs, state, build (parent graph)
 ├── memory/              # mem0 client, recall node, post-turn, history indexing
 ├── rag/                 # qdrant, embeddings, ingestion, retrieval tools, web cache
-├── services/            # redis client, frame buffer (TTL), rate limit, tts
+├── services/            # redis client, frame buffer (TTL), rate limit, tts,
+│                        # security (bcrypt + JWT), db/user_store/thread_store (auth)
 ├── tools/               # vision, system, swiggy MCP loader, tool sets
 ├── prompts/             # per-agent system prompts
 └── configs/             # settings (pydantic), llm factories, logging
-tests/                   # hermetic pytest suite (fakes for LLM/Redis/Qdrant/Mem0)
+static/                  # index.html (chat UI), login.html, account.html
+tests/                   # hermetic pytest suite (fakes for LLM/Redis/Qdrant/Mem0/auth stores)
 docs/                    # architecture, setup, infrastructure, memory-and-rag, api
 ```
 

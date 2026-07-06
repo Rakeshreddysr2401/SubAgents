@@ -59,8 +59,15 @@ production even when the chat model is local.
 uv run uvicorn main:app --host 0.0.0.0 --port 2024
 ```
 
-Open <http://localhost:2024>. In the UI settings bar, paste any string as the
-bearer token when `AUTH_DISABLED=true` (the default); it is not verified in dev.
+Open <http://localhost:2024>. With `AUTH_DISABLED=true` (the dev default) you're
+dropped straight into the chat UI as `default_user` — no login needed. With
+`AUTH_DISABLED=false` you'll be redirected to `/login` to create an account or
+sign in; sessions are httpOnly cookies, not a token you paste in. See
+[Auth & Sessions](../CLAUDE.md#auth--sessions-src-apiauthpy) in `CLAUDE.md` for
+the full design, and set a real `JWT_SECRET` before flipping `AUTH_DISABLED` off
+(the app refuses to start with the default secret otherwise). Set
+`COOKIE_SECURE=true` once you're actually serving over HTTPS — cookies won't be
+sent over plain http with it on, which is why local dev defaults it to `false`.
 
 ## 5. Optional: wake word
 

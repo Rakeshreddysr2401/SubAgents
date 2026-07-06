@@ -9,11 +9,14 @@ Qdrant.
 ## High-level flow
 
 ```
-Browser SPA (static/index.html)
-   │  POST /chat (SSE token deltas)   WS /ws/frames   GET /events   POST /upload
+Browser SPA (static/index.html, login.html, account.html)
+   │  POST /chat (SSE)   WS /ws/frames   GET /events   POST /upload
+   │  /auth/* (signup, login, refresh, logout, me, change-password, account)
+   │  /threads/* (list, messages, rename, delete)
    ▼
 FastAPI (uvicorn on macOS host, port 2024)   main.py → src/app.py
-   │  lifespan owns: AsyncPostgresSaver, Redis, Qdrant, Mem0, MCP tools, graph
+   │  lifespan owns: AsyncPostgresSaver, Redis, Qdrant, Mem0, MCP tools, graph,
+   │  a Postgres pool for users/chat_threads (src/services/db.py)
    ▼
 LangGraph parent graph
    START → recall_memories (Mem0 search) → assistant (swarm) → END
@@ -30,8 +33,11 @@ Post-turn background pipeline (BackgroundTasks)
 
 ## Turn lifecycle
 
-1. `POST /chat` authenticates (JWT → `user_id`), rate-limits, validates the
-   `thread_id`, and starts `graph.astream(..., stream_mode=["messages","updates"])`.
+1. `POST /chat` authenticates (cookie or bearer JWT → `user_id`, see
+   [Auth & Sessions](../CLAUDE.md#auth--sessions-src-apiauthpy)), rate-limits,
+   validates the `thread_id`, records/touches that thread's ownership row
+   (`chat_threads`, title derived from the first message), and starts
+   `graph.astream(..., stream_mode=["messages","updates"])`.
 2. **recall_memories** searches Mem0 for memories relevant to the latest user
    message and writes them into `recalled_memories`.
 3. The **swarm** routes to the active agent (sticky) or the default
@@ -75,11 +81,21 @@ Post-turn background pipeline (BackgroundTasks)
 | Store | Holds | Owner |
 |---|---|---|
 | PostgreSQL | LangGraph checkpoints (thread state) | `AsyncPostgresSaver` |
-| Redis | latest webcam frame (TTL), web-search exact cache, rate-limit counters | `src/services/*` |
+| PostgreSQL `users` | account email + bcrypt password hash | `src/services/user_store.py` |
+| PostgreSQL `chat_threads` | thread ownership, title, last-active — the sidebar's data | `src/services/thread_store.py` |
+| Redis | latest webcam frame (TTL), web-search exact cache, rate-limit counters, `refresh_token:<jti>` → user_id (revocable sessions) | `src/services/*` |
 | Qdrant `documents` | uploaded-document chunks | RAG ingestion |
 | Qdrant `history` | turn summaries + webcam-frame descriptions | post-turn pipeline |
 | Qdrant `search_cache` | semantic web-search cache | `cached_web_search` |
 | Qdrant `mem0_memories` | long-term user memories | Mem0 |
 
-See [memory-and-rag.md](memory-and-rag.md) for the memory/RAG details and
-[infrastructure.md](infrastructure.md) for the container topology.
+The `users`/`chat_threads` tables live in a separate `psycopg_pool` connection
+pool from the LangGraph checkpointer (`src/services/db.py`) — same Postgres
+instance, independent connections. Thread ownership is metadata layered on top
+of the checkpointer's own thread_id keying; deleting a `chat_threads` row hides
+a conversation from the sidebar but doesn't purge the underlying checkpoint.
+
+See [memory-and-rag.md](memory-and-rag.md) for the memory/RAG details,
+[infrastructure.md](infrastructure.md) for the container topology, and
+[CLAUDE.md → Auth & Sessions](../CLAUDE.md#auth--sessions-src-apiauthpy) for
+the full auth design.
