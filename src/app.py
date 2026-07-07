@@ -9,8 +9,8 @@ Redis and Qdrant clients, Swiggy MCP tools, and the compiled LangGraph graph.
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
@@ -24,7 +24,7 @@ from src.services.user_store import PostgresUserStore
 
 logger = get_logger(__name__)
 
-_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+_WEB_DIST_DIR = Path(__file__).resolve().parent.parent / "web" / "dist"
 
 
 @asynccontextmanager
@@ -69,6 +69,12 @@ async def lifespan(app: FastAPI):
 
         swiggy_tools = await load_swiggy_tools()
         apply_swiggy_tools(swiggy_tools)
+        for t in swiggy_tools:
+            # One-time enumeration so cart-mutation/order-placement tool names
+            # can be identified and added to GATED_TOOL_NAMES (src/commons/
+            # constants.py) — not visible in source since these load
+            # dynamically from the remote Swiggy MCP server.
+            logger.info("Swiggy MCP tool available: %s", t.name)
 
         # Build the graph with real persistence (after MCP tools are applied)
         from src.graph.build import build_graph
@@ -137,26 +143,38 @@ def _maybe_start_wake_word(app: FastAPI, settings):
 def create_app() -> FastAPI:
     app = FastAPI(title="SubAgents API", version="0.2.0", lifespan=lifespan)
 
-    if _STATIC_DIR.exists():
-        app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+    # React SPA (web/), built via `npm run build` in web/ -> web/dist/. Vite's
+    # index.html references /assets/*.js|css and /favicon.svg directly, so
+    # those are mounted at the paths it expects; the SPA shell itself is
+    # served for the three top-level page routes (explicit routes, not a
+    # catch-all, so nothing here can shadow an API router below).
+    if _WEB_DIST_DIR.exists():
+        app.mount("/assets", StaticFiles(directory=_WEB_DIST_DIR / "assets"), name="web-assets")
 
-    def _serve(name: str, fallback: str):
-        page = _STATIC_DIR / name
-        if page.exists():
-            return page.read_text(encoding="utf-8")
-        return fallback
+    def _serve_spa() -> str:
+        index_html = _WEB_DIST_DIR / "index.html"
+        if index_html.exists():
+            return index_html.read_text(encoding="utf-8")
+        return "<h1>SubAgents API</h1><p>Web app not built. Run `npm run build` in web/.</p>"
+
+    @app.get("/favicon.svg", include_in_schema=False)
+    async def favicon():
+        favicon_path = _WEB_DIST_DIR / "favicon.svg"
+        if favicon_path.exists():
+            return FileResponse(favicon_path)
+        raise HTTPException(status_code=404)
 
     @app.get("/", response_class=HTMLResponse)
     async def chat_ui():
-        return _serve("index.html", "<h1>SubAgents API</h1><p>Chat UI not found. Add static/index.html</p>")
+        return _serve_spa()
 
     @app.get("/login", response_class=HTMLResponse)
     async def login_page():
-        return _serve("login.html", "<h1>SubAgents</h1><p>Login page not found. Add static/login.html</p>")
+        return _serve_spa()
 
     @app.get("/account", response_class=HTMLResponse)
     async def account_page():
-        return _serve("account.html", "<h1>SubAgents</h1><p>Account page not found. Add static/account.html</p>")
+        return _serve_spa()
 
     app.include_router(auth.router)
     app.include_router(chat.router)

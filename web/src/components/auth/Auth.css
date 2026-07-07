@@ -1,0 +1,135 @@
+.auth-body {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 20% 20%, #eef0ff 0%, var(--bg) 55%);
+  padding: 20px;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 50px rgba(30, 41, 59, 0.12);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.auth-card-header {
+  background: var(--header-bg);
+  padding: 32px 32px 26px;
+  text-align: center;
+  color: #fff;
+}
+.auth-card-header .logo-icon {
+  width: 48px; height: 48px;
+  margin: 0 auto 14px;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+}
+.auth-card-header .logo-icon svg { width: 26px; height: 26px; color: #fff; }
+.auth-card-header h1 { font-size: 20px; font-weight: 800; letter-spacing: -0.3px; }
+.auth-card-header p { font-size: 12.5px; opacity: 0.85; margin-top: 4px; }
+
+.auth-tabs { display: flex; margin: 20px 24px 0; background: var(--bg); border-radius: 10px; padding: 3px; }
+.auth-tab {
+  flex: 1; text-align: center; padding: 8px 0;
+  font-size: 12.5px; font-weight: 600; color: var(--text-secondary);
+  border-radius: 8px; cursor: pointer; transition: all 0.2s;
+}
+.auth-tab.active { background: var(--surface); color: var(--primary); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08); }
+
+.auth-form { padding: 20px 24px 28px; display: flex; flex-direction: column; gap: 14px; }
+.auth-field { display: flex; flex-direction: column; gap: 6px; }
+.auth-field label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
+.auth-field input {
+  background: var(--bg); border: 1.5px solid var(--border); color: var(--text);
+  padding: 10px 13px; border-radius: 10px; font-size: 13.5px; font-family: inherit;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.auth-field input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-glow); background: var(--surface); }
+.auth-hint { font-size: 11px; color: var(--text-muted); }
+
+.auth-submit {
+  margin-top: 4px;
+  background: linear-gradient(135deg, #6366f1, #818cf8);
+  border: none; color: #fff; font-size: 13.5px; font-weight: 700;
+  padding: 11px 0; border-radius: 11px; cursor: pointer; transition: all 0.2s;
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3);
+}
+.auth-submit:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(99, 102, 241, 0.4); }
+.auth-submit:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+.auth-error {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: #dc2626;
+  font-size: 12.5px;
+  padding: 9px 12px;
+  border-radius: 9px;
+}
+
+.auth-switch-hint { text-align: center; font-size: 12px; color: var(--text-muted); }
+.auth-switch-hint a { color: var(--primary); font-weight: 600; cursor: pointer; }
+
+/* Account page */
+.account-wrap { width: 100%; max-width: 520px; margin: 0 auto; padding: 40px 20px; }
+.account-topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+.back-link {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 600; color: var(--text-secondary);
+  text-decoration: none; cursor: pointer;
+}
+.back-link:hover { color: var(--primary); }
+.back-link svg { width: 16px; height: 16px; }
+
+.account-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: 0 20px 50px rgba(30, 41, 59, 0.1);
+  margin-bottom: 20px; overflow: hidden;
+}
+.account-card-header { padding: 18px 24px; border-bottom: 1px solid var(--border); }
+.account-card-header h2 { font-size: 15px; font-weight: 700; }
+.account-profile-header { background: var(--header-bg); color: #fff; padding: 28px 24px; display: flex; align-items: center; gap: 16px; }
+.account-avatar {
+  width: 52px; height: 52px; border-radius: 14px;
+  background: rgba(255, 255, 255, 0.2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 800; flex-shrink: 0;
+}
+.account-profile-header .email { font-size: 15px; font-weight: 700; }
+.account-profile-header .sub { font-size: 12px; opacity: 0.85; margin-top: 2px; }
+
+.account-btn {
+  border: none; font-family: inherit; font-size: 13px; font-weight: 700;
+  padding: 10px 18px; border-radius: 10px; cursor: pointer; transition: all 0.2s;
+  align-self: flex-start;
+}
+.btn-primary { background: linear-gradient(135deg, #6366f1, #818cf8); color: #fff; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3); }
+.btn-primary:hover:not(:disabled) { transform: translateY(-1px); }
+.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+.btn-danger { background: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.3); }
+.btn-danger:hover { background: var(--danger); color: #fff; }
+.btn-ghost { background: var(--bg); color: var(--text-secondary); }
+
+.account-msg { font-size: 12.5px; padding: 9px 12px; border-radius: 9px; }
+.account-msg.error { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); color: #dc2626; }
+.account-msg.success { background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); color: #059669; }
+
+.danger-body { padding: 20px 24px 24px; display: flex; flex-direction: column; gap: 12px; }
+.danger-body p { font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }
+
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45);
+  display: flex; align-items: center; justify-content: center; z-index: 50;
+}
+.modal {
+  background: var(--surface); border-radius: 16px; padding: 22px; width: 90%; max-width: 360px;
+  display: flex; flex-direction: column; gap: 12px;
+  box-shadow: 0 20px 50px rgba(30, 41, 59, 0.1);
+}
+.modal h3 { font-size: 15px; font-weight: 700; }
+.modal p { font-size: 12.5px; color: var(--text-secondary); }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px; }

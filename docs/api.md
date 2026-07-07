@@ -88,12 +88,46 @@ Run a turn and stream the response as Server-Sent Events.
 | Event | When | Shape |
 |---|---|---|
 | token delta | 0..n times | `{"delta": "<text>"}` |
-| done | once, on success | `{"done": true, "thread_id": "...", "active_agent": "conversation\|swiggy\|tracker"}` |
+| agent change | 0..n times | `{"agent": "conversation\|swiggy\|tracker\|planner"}` |
+| tool call | 0..n times | `{"tool_call": {"id","name","args","agent"}}` |
+| tool result | 0..n times | `{"tool_result": {"id","name","result_preview","agent"}}` |
+| interrupt | 0..n times, pauses the turn | `{"interrupt": {"id","action_requests","review_configs"}}` |
+| done | once, on success (not emitted if the turn paused on an interrupt) | `{"done": true, "thread_id": "...", "active_agent": "..."}` |
 | error | on failure/timeout | `{"error": "<message>"}` |
 
-Tokens must be concatenated in order to form the reply. (A legacy
-`{"text": "..."}` full-response event is still handled by the frontend for
-backward compatibility but is no longer emitted.)
+Tokens must be concatenated in order to form the reply. `agent`/`tool_call`/
+`tool_result`/`interrupt` are additive — unrecognized event keys should be
+ignored rather than treated as an error. `tool_call`/`tool_result`/`interrupt`
+are deduped by `id` server-side (the same event would otherwise repeat for each
+nested graph level the update passes through). A `write_todos` tool call (from
+the `planner` agent) carries `{"todos": [{"content","status"}]}` in `args`.
+
+If an `interrupt` event fires, no `done` follows for this call — resolve it via
+`POST /chat/resume` before the turn can complete.
+
+## POST /chat/resume
+
+Resume a turn that paused on an `{"interrupt": ...}` event from `POST /chat`.
+
+**Query params**: `thread_id` (required — must match the original `/chat` call)
+**Body**:
+```json
+{ "decisions": [{ "type": "approve" }], "always_speak": false }
+```
+
+Each entry in `decisions` corresponds to one `action_requests` entry from the
+interrupt event, in order, and is one of:
+
+```json
+{ "type": "approve" }
+{ "type": "edit", "edited_action": { "name": "...", "args": { } } }
+{ "type": "reject", "message": "optional reason shown to the model" }
+{ "type": "respond", "message": "answer given on the tool's behalf, skipping execution" }
+```
+
+Streams the same SSE contract as `POST /chat` (including further `interrupt`
+events if the turn hits another gated call), continuing from exactly where the
+graph paused.
 
 ## GET /history/{thread_id}
 

@@ -2,6 +2,7 @@
 
 from typing import Optional
 
+from deepagents import DeepAgentState
 from langchain.agents import AgentState
 from langgraph_swarm import SwarmState
 
@@ -18,6 +19,13 @@ class VisualAssistantState(SwarmState):
 
 class VisualAgentState(AgentState):
     """Per-agent (react subgraph) state — shares the swarm's extra channels."""
+
+    agent_turn_visits: dict
+    recalled_memories: list
+
+
+class PlannerAgentState(DeepAgentState):
+    """Planner's state — DeepAgentState (adds todos/files) plus the swarm's extra channels."""
 
     agent_turn_visits: dict
     recalled_memories: list

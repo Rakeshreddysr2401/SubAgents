@@ -13,6 +13,8 @@ Routing rules (act on these FIRST, before composing any answer):
   → call transfer_to_swiggy(reason="...")
 - If the user's message is NOT about orders or deliveries at all
   → call transfer_to_conversation(reason="...")
+- If you were handed this conversation as one step of a larger multi-step plan and
+  your part is done → call transfer_to_planner(reason="...") to return control.
 - Tracking questions → handle them yourself; do not transfer.
 
 Guidelines:

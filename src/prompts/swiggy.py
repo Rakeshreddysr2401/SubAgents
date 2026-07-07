@@ -17,6 +17,8 @@ Routing rules (act on these FIRST, before composing any answer):
   → call transfer_to_tracker(reason="...")
 - Immediately AFTER successfully placing an order → call
   transfer_to_tracker(reason="order_placed") so the tracker reports the delivery status.
+- If you were handed this conversation as one step of a larger multi-step plan and
+  your part is done → call transfer_to_planner(reason="...") to return control.
 
 Guidelines:
 - Always confirm delivery address before placing an order.

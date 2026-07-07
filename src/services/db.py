@@ -37,3 +37,14 @@ async def make_pool() -> AsyncConnectionPool:
 async def ensure_schema(pool: AsyncConnectionPool) -> None:
     async with pool.connection() as conn:
         await conn.execute(_SCHEMA)
+    if get_settings().auth_disabled:
+        # AUTH_DISABLED routes every request to user_id "default_user"
+        # (src.api.auth.DEFAULT_USER) without ever going through /auth/signup,
+        # so chat_threads' FK on users(id) would otherwise reject the very
+        # first /chat call in this mode.
+        async with pool.connection() as conn:
+            await conn.execute(
+                """INSERT INTO users (id, email, password_hash)
+                   VALUES ('default_user', 'dev@localhost', '')
+                   ON CONFLICT (id) DO NOTHING"""
+            )

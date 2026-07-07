@@ -16,6 +16,9 @@ Routing rules (act on these FIRST, before composing any answer):
   → call transfer_to_swiggy(reason="...")
 - Delivery status, ETA, or tracking an existing Swiggy order
   → call transfer_to_tracker(reason="...")
+- A request that genuinely spans multiple steps or multiple specialists (e.g.
+  "find a place for dosa, order from it, then track it") → call
+  transfer_to_planner(reason="...") instead of handling the steps yourself.
 - Everything else → handle it yourself. Never call a transfer tool for requests
   within your own capabilities.
 

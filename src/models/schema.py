@@ -12,6 +12,25 @@ class ChatRequest(BaseModel):
     always_speak: bool = False
 
 
+class ResumeDecision(BaseModel):
+    """One decision for one interrupted tool call.
+
+    Shape mirrors langchain.agents.middleware.human_in_the_loop.Decision:
+    type is one of "approve" | "edit" | "reject" | "respond". `edited_action`
+    is required for "edit" ({"name", "args"}), `message` is used by "reject"
+    (optional) and "respond" (required).
+    """
+
+    type: str
+    edited_action: dict | None = None
+    message: str | None = None
+
+
+class ResumeRequest(BaseModel):
+    decisions: List[ResumeDecision]
+    always_speak: bool = False
+
+
 class MessageItem(BaseModel):
     role: str = Field(description="'user' or 'assistant'")
     content: str
