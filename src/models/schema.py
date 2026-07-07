@@ -7,9 +7,18 @@ from pydantic import BaseModel, Field
 # API Request / Response
 # ---------------------------------------------------------------------------
 
+class LocationIn(BaseModel):
+    """Browser geolocation fix, sent along with a chat turn (optional)."""
+
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    accuracy_m: float | None = None
+
+
 class ChatRequest(BaseModel):
     query: str
     always_speak: bool = False
+    location: LocationIn | None = None
 
 
 class ResumeDecision(BaseModel):
@@ -92,3 +101,37 @@ class ThreadOut(BaseModel):
 
 class RenameThreadRequest(BaseModel):
     title: str = Field(min_length=1, max_length=200)
+
+
+# ---------------------------------------------------------------------------
+# Reminders
+# ---------------------------------------------------------------------------
+
+class ReminderOut(BaseModel):
+    id: str
+    text: str
+    due_at: str
+    status: str
+    created_at: str
+    fired_at: str | None
+
+
+# ---------------------------------------------------------------------------
+# Shopping list
+# ---------------------------------------------------------------------------
+
+class ShoppingItemOut(BaseModel):
+    id: str
+    name: str
+    quantity: str | None
+    purchased: bool
+    created_at: str
+
+
+class AddShoppingItemRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    quantity: str | None = Field(default=None, max_length=50)
+
+
+class UpdateShoppingItemRequest(BaseModel):
+    purchased: bool

@@ -1,0 +1,207 @@
+/* Shared styling for the left-panel cards (reminders, shopping, music).
+   Builds on .tools-card / .tools-card-header from ChatView.css. */
+
+.panel-card {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px 10px;
+  overflow-y: auto;
+  max-height: 220px;
+}
+
+.panel-empty {
+  font-size: 12px;
+  opacity: 0.55;
+  padding: 6px 2px;
+  line-height: 1.5;
+}
+
+.panel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 8px;
+}
+
+.panel-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.panel-row.muted {
+  opacity: 0.5;
+}
+
+.panel-row-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.panel-row-title {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-row-title.struck {
+  text-decoration: line-through;
+}
+
+.panel-row-sub {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.panel-row-action {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.5;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.panel-row-action:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.panel-subheader {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.5;
+  margin-top: 6px;
+  padding: 0 2px;
+}
+
+.panel-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.panel-check input[type="checkbox"] {
+  accent-color: var(--primary, #5c8dff);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.panel-add {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.panel-add input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border, #2e3140);
+  border-radius: 8px;
+  color: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.panel-add input:focus {
+  outline: none;
+  border-color: var(--primary, #5c8dff);
+}
+
+.panel-add button {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border, #2e3140);
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 10px;
+}
+
+.panel-add button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Music panel */
+.music-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.music-select {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border, #2e3140);
+  border-radius: 8px;
+  color: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.music-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border, #2e3140);
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.music-btn.playing {
+  border-color: var(--primary, #5c8dff);
+  color: var(--primary, #5c8dff);
+}
+
+.music-now-playing {
+  font-size: 12px;
+  opacity: 0.75;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.music-eq {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.music-eq span {
+  width: 3px;
+  background: var(--primary, #5c8dff);
+  animation: music-eq-bounce 0.9s ease-in-out infinite;
+}
+
+.music-eq span:nth-child(2) { animation-delay: 0.2s; }
+.music-eq span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes music-eq-bounce {
+  0%, 100% { height: 4px; }
+  50% { height: 12px; }
+}

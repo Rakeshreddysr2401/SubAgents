@@ -66,6 +66,11 @@ def _format(results: list[dict]) -> str:
 async def cached_web_search(query: str) -> str:
     """Search the web for current information. Results are cached to avoid
     repeated lookups of the same or similar queries."""
+    return await cached_search(query)
+
+
+async def cached_search(query: str) -> str:
+    """The layered search itself, callable from other tools (e.g. news)."""
     settings = get_settings()
     redis = redis_client.get_redis()
     key = _cache_key(query)

@@ -26,7 +26,3 @@ def get_redis(request: Request):
 
 def get_qdrant(request: Request):
     return request.app.state.qdrant
-
-
-def get_event_queue(request: Request):
-    return request.app.state.event_queue

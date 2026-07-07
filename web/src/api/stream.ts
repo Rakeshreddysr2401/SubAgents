@@ -41,14 +41,19 @@ async function* consumeSSE(response: Response): AsyncGenerator<ChatEvent> {
   }
 }
 
-export function streamChat(threadId: string, query: string, alwaysSpeak: boolean): AsyncGenerator<ChatEvent> {
+export function streamChat(
+  threadId: string,
+  query: string,
+  alwaysSpeak: boolean,
+  location: { lat: number; lon: number; accuracy_m: number | null } | null = null,
+): AsyncGenerator<ChatEvent> {
   const url = new URL("/chat", window.location.origin);
   if (threadId) url.searchParams.set("thread_id", threadId);
 
   const responsePromise = authFetch(url.toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, always_speak: alwaysSpeak }),
+    body: JSON.stringify({ query, always_speak: alwaysSpeak, location }),
   });
   return consumeStreamed(responsePromise);
 }

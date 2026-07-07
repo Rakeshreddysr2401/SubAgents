@@ -34,6 +34,7 @@ dependencies = [
     "pypdf>=6.14.2",
     "python-multipart>=0.0.29",
     "bcrypt>=5.0.0",
+    "httpx>=0.28.1",
 ]
 
 [project.optional-dependencies]
@@ -49,7 +50,6 @@ wake = [
 [dependency-groups]
 dev = [
     "fakeredis>=2.36.2",
-    "httpx>=0.28.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
 ]

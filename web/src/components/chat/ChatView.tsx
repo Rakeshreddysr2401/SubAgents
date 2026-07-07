@@ -14,6 +14,13 @@ import { Composer } from "./Composer";
 import { CameraPanel } from "../vision/CameraPanel";
 import { WakeWordIndicator } from "../voice/WakeWordIndicator";
 import { VoiceWaveform } from "../voice/VoiceWaveform";
+import { EventsBridge } from "../EventsBridge";
+import { ToastStack } from "../notifications/ToastStack";
+import { RemindersPanel } from "../panels/RemindersPanel";
+import { ShoppingPanel } from "../panels/ShoppingPanel";
+import { MusicPanel } from "../panels/MusicPanel";
+import { speak } from "../../lib/tts";
+import { getLocation } from "../../lib/geolocation";
 import "./ChatView.css";
 
 const HINTS = ["What can you do?", "Help me with a task", "Tell me about yourself"];
@@ -111,6 +118,8 @@ export function ChatView() {
         if (event.thread_id && event.thread_id !== threadId) {
           setThreadId(event.thread_id);
         }
+        // Voice mode: the browser speaks the finished reply (speechSynthesis).
+        if (alwaysSpeak && fullText) speak(fullText);
         continue;
       }
       if ("agent" in event) {
@@ -147,7 +156,7 @@ export function ChatView() {
       }
     }
     return true;
-  }, [threadId, setActiveAgent, addToolCall, addToolResult, setPendingInterrupt, setTodos]);
+  }, [threadId, alwaysSpeak, setActiveAgent, addToolCall, addToolResult, setPendingInterrupt, setTodos]);
 
   const sendMessage = useCallback(async (query: string) => {
     setSending(true);
@@ -157,7 +166,9 @@ export function ChatView() {
     setMessages((prev) => [...prev, { id: botId, role: "bot", content: "", thinking: true }]);
 
     try {
-      const finished = await consumeIntoMessage(streamChat(threadId, query, alwaysSpeak), botId, "");
+      // Location is best-effort: null on deny/timeout, cached 5 min.
+      const location = await getLocation();
+      const finished = await consumeIntoMessage(streamChat(threadId, query, alwaysSpeak, location), botId, "");
       if (finished) {
         loadThreads();
         setSending(false);
@@ -203,6 +214,8 @@ export function ChatView() {
 
   return (
     <div className="app-shell">
+      <EventsBridge />
+      <ToastStack />
       <div className="header">
         <div className="header-left">
           <div className="logo-icon">
@@ -262,19 +275,9 @@ export function ChatView() {
           </div>
           {todos && todos.length > 0 && <PlanCard todos={todos} />}
           <CameraPanel threadId={threadId} />
-          <div className="tools-card">
-            <div className="tools-card-header">Tools</div>
-            <div className="tools-body">
-              <div className="tools-empty">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                  <line x1="3" y1="9" x2="21" y2="9" />
-                  <line x1="9" y1="21" x2="9" y2="9" />
-                </svg>
-                <span>Coming soon</span>
-              </div>
-            </div>
-          </div>
+          <RemindersPanel />
+          <ShoppingPanel />
+          <MusicPanel />
         </div>
 
         <div className="right-panel">

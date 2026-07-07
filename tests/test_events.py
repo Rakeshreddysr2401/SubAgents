@@ -1,43 +1,37 @@
-"""Wake-word event fan-out."""
+"""Server-push event fan-out (wake word + JSON payload contract)."""
 
 import asyncio
-from types import SimpleNamespace
+import json
+import threading
 
-from src.api.events import broadcast_event
-
-
-def _app_with_subscribers(n: int):
-    subs = {asyncio.Queue() for _ in range(n)}
-    app = SimpleNamespace(state=SimpleNamespace(event_subscribers=subs))
-    return app, subs
+from src.services.event_broker import EventBroker
 
 
 async def test_broadcast_reaches_every_subscriber():
-    app, subs = _app_with_subscribers(3)
-    count = broadcast_event(app, "start_voice")
+    broker = EventBroker()
+    queues = [broker.subscribe(f"user-{i}") for i in range(3)]
+    count = broker.broadcast({"type": "start_voice"})
     assert count == 3
-    for q in subs:
-        assert q.get_nowait() == "start_voice"
+    for q in queues:
+        assert json.loads(q.get_nowait()) == {"type": "start_voice"}
 
 
 async def test_broadcast_with_no_subscribers_is_noop():
-    app, _ = _app_with_subscribers(0)
-    assert broadcast_event(app, "start_voice") == 0
+    broker = EventBroker()
+    assert broker.broadcast({"type": "start_voice"}) == 0
 
 
 async def test_threadsafe_bridge_delivers_from_another_thread():
-    """Mirror the in-process listener: an audio thread hands the event to the
-    loop via call_soon_threadsafe, which fans it out."""
-    import threading
-
-    app, subs = _app_with_subscribers(2)
+    """Mirror the in-process wake-word listener: an audio thread hands the
+    event to the loop via call_soon_threadsafe, which fans it out."""
+    broker = EventBroker()
+    queues = [broker.subscribe("u1"), broker.subscribe("u2")]
     loop = asyncio.get_running_loop()
 
     def audio_thread():
-        loop.call_soon_threadsafe(broadcast_event, app, "start_voice")
+        loop.call_soon_threadsafe(broker.broadcast, {"type": "start_voice"})
 
     threading.Thread(target=audio_thread).start()
-    # Give the scheduled callback a tick to run
     await asyncio.sleep(0.05)
-    for q in subs:
-        assert q.get_nowait() == "start_voice"
+    for q in queues:
+        assert json.loads(q.get_nowait()) == {"type": "start_voice"}

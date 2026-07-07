@@ -31,6 +31,22 @@ retrieval-augmented reasoning, and human-in-the-loop approval for risky actions.
   (`recall_history`); cached web search (Redis exact + Qdrant semantic + Tavily).
 - **Multimodal perception** — live webcam vision (`capture_webcam`) with frames
   buffered in Redis with a TTL; camera preview and wake-word status in the UI.
+- **It speaks** — replies are read aloud in the browser (speechSynthesis) when
+  voice mode is on; reminders and guardian alerts are spoken too.
+- **Reminders** — "remind me at 5 to go to the movie" schedules a Postgres-backed
+  reminder; when due, the browser shows a persistent toast and says it out loud.
+- **Shopping list** — "remember we need to buy soap" maintains a real per-user
+  list (panel with checkboxes); the swiggy agent consults it when ordering
+  groceries and ticks items off after ordering.
+- **Music & news** — internet-radio playback in the browser controlled by voice
+  ("play some music"), and date-fresh news summaries via `get_latest_news`.
+- **Location aware** — browser geolocation (opt-in) flows to tools;
+  `get_current_location` reverse-geocodes via OpenStreetMap for "near me" asks.
+- **Guardian mode** — toggle the shield (or say "watch my room"): the backend
+  watches the camera with the vision model and alerts you (toast + voice) if
+  something looks wrong, with an alert cooldown.
+- **Per-user server push** — an authenticated `/events` SSE channel routes
+  reminders/music/guardian events only to their owner's browser tabs.
 - **Durable persistence** — Postgres checkpointer; state survives restarts.
 - **Real accounts & sessions** — signup/login pages, httpOnly-cookie JWT
   sessions with rotating refresh tokens, per-user conversation history sidebar,
@@ -92,6 +108,7 @@ Full details in **[docs/architecture.md](docs/architecture.md)**.
 | [docs/infrastructure.md](docs/infrastructure.md) | Containers, volumes, backup, resilience |
 | [docs/memory-and-rag.md](docs/memory-and-rag.md) | Mem0, RAG collections, embedding-dim invariant |
 | [docs/api.md](docs/api.md) | Endpoint + SSE contract reference |
+| [docs/learning-roadmap.md](docs/learning-roadmap.md) | Phase-2 preference-learning design (no code yet) |
 | [CLAUDE.md](CLAUDE.md) | Developer/AI implementation reference |
 
 ---

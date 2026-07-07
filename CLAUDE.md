@@ -16,10 +16,14 @@ Technical reference for the SubAgents codebase. Read this before making changes.
 - **Entry**: `main.py` → `src/app.py:create_app()`; graph built in the lifespan
 - **4 agents**: conversation (default/router), swiggy, tracker, planner (real `deepagents`
   deep agent) — coordinated as a swarm
-- **Stores**: Postgres (checkpoints + users/chat_threads), Redis (frames/cache/rate-limit/refresh-tokens), Qdrant (RAG + Mem0)
+- **Stores**: Postgres (checkpoints + users/chat_threads/reminders/shopping_items),
+  Redis (frames/cache/rate-limit/refresh-tokens/guardian-state/geocode-cache), Qdrant (RAG + Mem0)
 - **Auth**: cookie-based JWT sessions with a real signup/login UI — see [Auth & Sessions](#auth--sessions-src-apiauthpy)
 - **HITL**: risky tool calls (e.g. `open_mac_app`) pause for human approval via
   `interrupt()` — see [Human-in-the-loop approvals](#human-in-the-loop-approvals)
+- **Server push**: authenticated per-user `/events` SSE (JSON `{"type": ...}`
+  payloads) via the module-level `EventBroker`; browser speaks via
+  speechSynthesis — see [Events, reminders, guardian, music, location](#events-reminders-guardian-music-location)
 
 ---
 
@@ -31,13 +35,16 @@ docker-compose.yml       # postgres, redis, qdrant
 src/
 ├── app.py               # FastAPI factory + lifespan (owns all long-lived resources);
 │                        # serves web/dist/ (React build) for /, /login, /account
-├── api/                 # chat (SSE + /chat/resume), frames, uploads, events, auth, threads, deps
+├── api/                 # chat (SSE + /chat/resume), frames, uploads, events, auth, threads,
+│                        # reminders, shopping, music, guardian, deps
 ├── graph/               # state, handoff, swarm (incl. planner + HITL middleware), build (parent graph)
 ├── memory/              # mem0_client, recall, post_turn, history_index
 ├── rag/                 # qdrant, embeddings, store, ingestion, retrieval_tools, web_cache
-├── services/            # redis_client, frame_buffer, rate_limit, tts, security,
-│                        # db, user_store, thread_store (auth + chat-thread persistence)
-├── tools/               # vision_tools, system_tools, swiggy_mcp, __init__ (tool sets)
+├── services/            # redis_client, frame_buffer, rate_limit, security,
+│                        # db, user_store, thread_store, reminder_store, shopping_store,
+│                        # event_broker, reminder_scheduler, guardian
+├── tools/               # vision, system, swiggy_mcp, reminder, shopping, music, news,
+│                        # location, guardian, __init__ (tool sets)
 ├── prompts/             # conversation, swiggy, tracker, planner (build_prompt() -> str)
 ├── commons/constants.py # agent name strings + AGENT_DESCRIPTIONS + GATED_TOOL_NAMES
 ├── models/schema.py     # pydantic request/response
@@ -282,15 +289,72 @@ requires a real `JWT_SECRET` (validator raises otherwise) — see
 
 ```python
 CONVERSATION_TOOLS = [capture_webcam, get_system_info, open_mac_app,
-                      search_documents, recall_history, *web_tools]
-SWIGGY_TOOLS  = []   # filled by apply_swiggy_tools() at startup
-TRACKER_TOOLS = []   # filled by apply_swiggy_tools() at startup
+                      get_current_location, search_documents, recall_history,
+                      *REMINDER_TOOLS, *SHOPPING_TOOLS, *MUSIC_TOOLS,
+                      *GUARDIAN_TOOLS, *web_tools]
+_SWIGGY_BASE_TOOLS = [*SHOPPING_TOOLS, get_current_location]  # non-MCP, always present
+SWIGGY_TOOLS  = [*_SWIGGY_BASE_TOOLS]  # + MCP tools at startup
+TRACKER_TOOLS = []                     # MCP tools at startup
 ```
 
 - Handoff tools are appended per-agent in `swarm.py`, not stored here.
-- `apply_swiggy_tools(mcp_tools)` mutates the lists in place; the graph is built
-  after it so ToolNodes snapshot the full lists.
+- `apply_swiggy_tools(mcp_tools)` **composes** `[*_SWIGGY_BASE_TOOLS, *mcp_tools]`
+  — it must never plain-overwrite `SWIGGY_TOOLS`, or import-time tools (shopping,
+  location) get silently wiped at startup. The graph is built after it so
+  ToolNodes snapshot the full lists.
 - `capture_webcam` is **async** (reads the Redis frame buffer).
+- Tools that need the current user/thread take `config: RunnableConfig` and read
+  `config["configurable"]["user_id"/"thread_id"/"location"]` (chat.py builds it).
+  Stores are reached via module-level `configure_*/get_*` pairs (set in the
+  lifespan; `InMemory*` twins in tests) — never via `app.state`.
+
+---
+
+## Events, reminders, guardian, music, location
+
+- **`src/services/event_broker.py`** — module-level `EventBroker` singleton
+  (`get_broker()`/`reset_broker()`): `subscribe(user_id)`, `broadcast(payload,
+  user_id=None)` (None = all users). All payloads are JSON `{"type": ...}`;
+  the client ignores unknown types, so new event types are additive. Full type
+  table in `docs/api.md`. Must be called on the event loop (threads use
+  `loop.call_soon_threadsafe`, see the wake-word listener in `src/app.py`).
+- **`GET /events`** (`src/api/events.py`) is authenticated (`Depends(get_user_id)`)
+  and per-user routed. The React client owns exactly ONE subscription:
+  `web/src/components/EventsBridge.tsx` (headless; dispatches into zustand
+  stores, silently refreshes the access token before reconnecting).
+- **Browser TTS** — `web/src/lib/tts.ts::speak()` (speechSynthesis; strips
+  markdown, chunks sentences because Chrome kills long utterances). Replies are
+  spoken on the `done` SSE event when voice mode is on; reminders/guardian
+  alerts are spoken from EventsBridge. The host Mac `say` path still exists but
+  is opt-in (`HOST_TTS_ENABLED`, default false).
+- **Reminders** — `reminders` table + `PostgresReminderStore`/`InMemoryReminderStore`
+  (`src/services/reminder_store.py`); tools in `src/tools/reminder_tools.py`
+  (LLM passes ISO-8601 — agents get a live clock line injected per model call
+  by `_make_prompt_middleware` in `swarm.py`); lifespan-owned polling loop
+  (`src/services/reminder_scheduler.py`, `REMINDER_POLL_SECONDS`) claims due
+  rows atomically (`UPDATE … RETURNING`) so overlapping ticks can't double-fire.
+  Panel REST: `GET/DELETE /reminders` (`src/api/reminders.py`).
+- **Shopping list** — `shopping_items` table + store twins
+  (`src/services/shopping_store.py`); name-matched tools
+  (`src/tools/shopping_tools.py`, ambiguity returns candidates); REST
+  `src/api/shopping.py`; in both `CONVERSATION_TOOLS` and `_SWIGGY_BASE_TOOLS`.
+- **Guardian** (`src/services/guardian.py`) — Redis set `guardian:enabled` +
+  per-user JSON state; lifespan loop every `GUARDIAN_INTERVAL_SECONDS` pulls
+  `get_latest_frame(thread_id)` and asks **`get_vision_llm()`** (the dedicated
+  VLM endpoint — `VISION_LLM_BASE_URL`/`VISION_MODEL`, defaulting to the
+  llama.cpp mac-mini config; NOT `get_utility_llm()`) for a JSON verdict vs.
+  the previous observation; alerts respect `GUARDIAN_ALERT_COOLDOWN_SECONDS`;
+  no-frame is notified once until frames resume. REST `src/api/guardian.py` +
+  voice tools `src/tools/guardian_tools.py` share the same state. Note:
+  `capture_webcam` images still go to the *calling agent's* model (`get_llm()`)
+  — keep the chat model multimodal, or vision questions in chat degrade.
+- **Location** — `ChatRequest.location` (browser geolocation, optional) →
+  `config["configurable"]["location"]` → `get_current_location`
+  (`src/tools/location_tools.py`): Nominatim reverse geocode with a 1.1s
+  rate-limit lock + 24h Redis cache, degrades to raw coords, never raises.
+- **Music** — `MUSIC_STATIONS` (JSON in settings) → `play_music`/`stop_music`
+  tools broadcast `music` events; playback is entirely browser-side
+  (`web/src/components/panels/MusicPanel.tsx`, autoplay-block fallback).
 
 ---
 
@@ -339,6 +403,19 @@ TRACKER_TOOLS = []   # filled by apply_swiggy_tools() at startup
   `chat_threads.user_id` has an FK to `users.id`.
 - **`deepagents` requires langgraph>=1.2.7 / langchain>=1.3.11** — a real
   compatibility constraint (see `pyproject.toml`), not just a style preference.
+- **`apply_swiggy_tools` must compose, not overwrite** — it builds
+  `[*_SWIGGY_BASE_TOOLS, *mcp_tools]`; a plain `SWIGGY_TOOLS[:] = mcp_tools`
+  silently wipes the shopping/location tools registered at import time
+  (guarded by `tests/test_shopping_tools.py::test_apply_swiggy_tools_keeps_base_tools`).
+- **The planner has no live clock** — it uses a static `system_prompt`, so the
+  per-model-call time injection (conversation/swiggy/tracker only) doesn't reach
+  it. Time-sensitive requests (reminders) route through conversation.
+- **`EventBroker.broadcast` is loop-affine** — like the old fan-out, it must run
+  on the app's event loop; background threads bridge with
+  `loop.call_soon_threadsafe` (wake-word listener does this).
+- **`/events` payloads are JSON now** — a client checking
+  `event.data === "start_voice"` (the pre-v0.8 string contract) breaks; parse
+  JSON and switch on `type`.
 
 ---
 

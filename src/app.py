@@ -14,11 +14,24 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-from src.api import auth, chat, events, frames, threads, uploads
+from src.api import (
+    auth,
+    chat,
+    events,
+    frames,
+    guardian,
+    music,
+    reminders,
+    shopping,
+    threads,
+    uploads,
+)
 from src.configs.logging_config import get_logger, setup_logging
 from src.configs.settings import get_settings
 from src.services.db import ensure_schema, make_pool
 from src.services.redis_client import close_redis, get_redis
+from src.services.reminder_store import PostgresReminderStore, configure_reminder_store
+from src.services.shopping_store import PostgresShoppingStore, configure_shopping_store
 from src.services.thread_store import PostgresThreadStore
 from src.services.user_store import PostgresUserStore
 
@@ -43,6 +56,12 @@ async def lifespan(app: FastAPI):
         await ensure_schema(app.state.db)
         app.state.user_store = PostgresUserStore(app.state.db)
         app.state.thread_store = PostgresThreadStore(app.state.db)
+        app.state.reminder_store = PostgresReminderStore(app.state.db)
+        app.state.shopping_store = PostgresShoppingStore(app.state.db)
+        # Module-level accessors so the reminder/shopping tools (which can't
+        # see app.state) reach the same store instances.
+        configure_reminder_store(app.state.reminder_store)
+        configure_shopping_store(app.state.shopping_store)
 
         # Qdrant (shared module-level client so tools can reach it) + collections
         from src.rag.qdrant import ensure_collections, get_qdrant
@@ -80,11 +99,30 @@ async def lifespan(app: FastAPI):
         from src.graph.build import build_graph
 
         app.state.graph = build_graph(checkpointer=checkpointer, mem0=app.state.mem0)
-        # Wake-word event fan-out: one queue per connected /events subscriber
-        app.state.event_subscribers = set()
+        # Server-push events (wake word, reminders, guardian, music) fan out
+        # through the module-level broker — per-user routed, JSON payloads.
+        from src.services.event_broker import get_broker
+
+        app.state.event_broker = get_broker()
 
         # Optional in-process wake-word listener (single-command mode)
         wake_stop = _maybe_start_wake_word(app, settings)
+
+        # Background loops: reminder scheduler + guardian camera watcher.
+        import asyncio
+        from contextlib import suppress
+
+        from src.services.guardian import guardian_loop
+        from src.services.reminder_scheduler import reminder_loop
+
+        background_loops = [
+            asyncio.create_task(
+                reminder_loop(app.state.reminder_store, get_broker(), settings.reminder_poll_seconds)
+            ),
+            asyncio.create_task(
+                guardian_loop(get_broker(), settings.guardian_interval_seconds)
+            ),
+        ]
 
         logger.info("SubAgents started — standalone runtime, multimodal mode active")
         try:
@@ -92,6 +130,11 @@ async def lifespan(app: FastAPI):
         finally:
             if wake_stop is not None:
                 wake_stop.set()
+            for task in background_loops:
+                task.cancel()
+            for task in background_loops:
+                with suppress(asyncio.CancelledError):
+                    await task
             await close_redis()
             await app.state.qdrant.close()
             await app.state.db.close()
@@ -112,7 +155,7 @@ def _maybe_start_wake_word(app: FastAPI, settings):
     import threading
 
     try:
-        from src.api.events import broadcast_event
+        from src.services.event_broker import get_broker
         from src.services.wake_word import run_listener
     except Exception as e:  # pragma: no cover - optional deps
         logger.warning("Wake word enabled but unavailable: %s", e)
@@ -122,7 +165,7 @@ def _maybe_start_wake_word(app: FastAPI, settings):
     stop_event = threading.Event()
 
     def _fire():
-        n = broadcast_event(app, "start_voice")
+        n = get_broker().broadcast({"type": "start_voice"})
         logger.info(">>> Wake word detected — notified %d browser subscriber(s)", n)
 
     def on_detect():
@@ -182,6 +225,10 @@ def create_app() -> FastAPI:
     app.include_router(events.router)
     app.include_router(uploads.router)
     app.include_router(threads.router)
+    app.include_router(reminders.router)
+    app.include_router(shopping.router)
+    app.include_router(music.router)
+    app.include_router(guardian.router)
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):

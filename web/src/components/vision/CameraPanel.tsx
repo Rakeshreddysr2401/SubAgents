@@ -1,23 +1,64 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { authFetch } from "../../api/client";
+import { useEventsStore } from "../../state/eventsStore";
 
 interface CameraPanelProps {
   threadId: string;
 }
 
 const CAPTURE_INTERVAL_MS = 2000;
+const RETRY_DELAYS_MS = [1000, 2000, 4000];
 
 export function CameraPanel({ threadId }: CameraPanelProps) {
   const [active, setActive] = useState(false);
+  const [wsConnected, setWsConnected] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeRef = useRef(false);
+  const attemptRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const guardianEnabled = useEventsStore((s) => s.guardianEnabled);
+  const setGuardianEnabled = useEventsStore((s) => s.setGuardianEnabled);
+
+  // Pick up guardian state on mount (it survives page reloads server-side).
+  useEffect(() => {
+    authFetch("/guardian/status")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) setGuardianEnabled(Boolean(data.enabled));
+      })
+      .catch(() => {});
+  }, [setGuardianEnabled]);
 
   const connectWS = useCallback(() => {
-    wsRef.current?.close();
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    retryTimerRef.current = null;
+    if (wsRef.current) {
+      // Detach handlers so closing the old socket doesn't schedule a reconnect
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
+      wsRef.current.close();
+    }
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    wsRef.current = new WebSocket(`${proto}//${location.host}/ws/frames?thread_id=${threadId || "pending"}`);
+    const ws = new WebSocket(`${proto}//${location.host}/ws/frames?thread_id=${threadId || "pending"}`);
+    ws.onopen = () => {
+      attemptRef.current = 0;
+      setWsConnected(true);
+    };
+    ws.onclose = () => {
+      setWsConnected(false);
+      // Auto-reconnect while the camera is still on (backend restarts, network
+      // blips) — otherwise the UI showed LIVE over a dead socket forever.
+      if (activeRef.current && wsRef.current === ws) {
+        const delay = RETRY_DELAYS_MS[Math.min(attemptRef.current, RETRY_DELAYS_MS.length - 1)];
+        attemptRef.current += 1;
+        retryTimerRef.current = setTimeout(connectWS, delay);
+      }
+    };
+    wsRef.current = ws;
   }, [threadId]);
 
   const captureFrame = useCallback(() => {
@@ -33,13 +74,21 @@ export function CameraPanel({ threadId }: CameraPanelProps) {
   }, []);
 
   const stopCamera = useCallback(() => {
+    activeRef.current = false;
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    retryTimerRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
     if (intervalRef.current) clearInterval(intervalRef.current);
     intervalRef.current = null;
-    wsRef.current?.close();
+    if (wsRef.current) {
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
+      wsRef.current.close();
+    }
     wsRef.current = null;
+    setWsConnected(false);
     setActive(false);
   }, []);
 
@@ -50,6 +99,7 @@ export function CameraPanel({ threadId }: CameraPanelProps) {
       });
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
+      activeRef.current = true;
       setActive(true);
       connectWS();
       intervalRef.current = setInterval(captureFrame, CAPTURE_INTERVAL_MS);
@@ -57,6 +107,22 @@ export function CameraPanel({ threadId }: CameraPanelProps) {
       // permission denied/unavailable — the toggle button just stays off
     }
   }, [connectWS, captureFrame]);
+
+  const toggleGuardian = useCallback(async () => {
+    if (guardianEnabled) {
+      setGuardianEnabled(false);
+      await authFetch("/guardian/disable", { method: "POST" }).catch(() => {});
+      return;
+    }
+    // Guardian needs frames — auto-start the camera if it's off.
+    if (!activeRef.current) await startCamera();
+    setGuardianEnabled(true);
+    await authFetch("/guardian/enable", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ thread_id: threadId || "pending" }),
+    }).catch(() => setGuardianEnabled(false));
+  }, [guardianEnabled, setGuardianEnabled, startCamera, threadId]);
 
   // Frames must follow the active thread — reconnect the WS on thread change
   // (ports index.html's reconnectFrameWS(), called on newThread/selectThread).
@@ -77,9 +143,22 @@ export function CameraPanel({ threadId }: CameraPanelProps) {
           </svg>
           Camera
         </div>
-        <div className={`live-badge${active ? " active" : ""}`}>
-          <div className="dot" />
-          LIVE
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            className={`cam-btn guardian-btn${guardianEnabled ? " on" : ""}`}
+            onClick={toggleGuardian}
+            title={guardianEnabled ? "Guardian mode is ON — click to disable" : "Enable guardian mode (watches the camera and alerts you)"}
+            type="button"
+            style={{ width: 26, height: 26, padding: 4 }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+          </button>
+          <div className={`live-badge${active && wsConnected ? " active" : ""}`}>
+            <div className="dot" />
+            {active && !wsConnected ? "RECONNECTING" : "LIVE"}
+          </div>
         </div>
       </div>
       <div className="video-viewport">

@@ -6,6 +6,8 @@ Sticky routing is swarm-native: the last active agent receives the next user
 turn directly. Handoffs chain within the same turn.
 """
 
+from datetime import datetime
+
 from deepagents import create_deep_agent
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
@@ -55,17 +57,34 @@ class KeepOnlyLatestBridge(AgentMiddleware):
         return await handler(_prune_stale_bridges(request))
 
 
+def _time_context() -> str:
+    """A live clock line, evaluated fresh on every model call.
+
+    Agents need this to resolve relative times ("at 5", "tomorrow") into
+    absolute ISO-8601 datetimes for tools like create_reminder. Note: the
+    planner uses a static system_prompt (built once at graph build), so it
+    does NOT get a live clock — time-sensitive requests route through
+    conversation.
+    """
+    now = datetime.now().astimezone()
+    return (
+        f"\n\nCurrent date & time: {now.isoformat()} ({now.tzname()}). "
+        "Use this when interpreting relative times like 'at 5' or 'tomorrow'."
+    )
+
+
 def _make_prompt_middleware(base_prompt: str):
     @dynamic_prompt
     def prompt_with_memories(request: ModelRequest) -> str:
+        prompt = base_prompt + _time_context()
         memories = request.state.get("recalled_memories") or []
         if memories:
             return (
-                base_prompt
+                prompt
                 + "\n\n## What you remember about this user\n"
                 + "\n".join(f"- {m}" for m in memories)
             )
-        return base_prompt
+        return prompt
 
     return prompt_with_memories
 

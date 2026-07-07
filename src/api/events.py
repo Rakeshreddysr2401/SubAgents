@@ -1,61 +1,47 @@
-"""Wake-word event channel + health check.
+"""Server-push event channel + health check.
 
-GET  /events         SSE stream the browser subscribes to
+GET  /events         SSE stream the browser subscribes to (per-user routed)
 POST /trigger_voice  called by wake_word.py to wake the UI mic
 GET  /health
 
-Events fan out to *every* connected subscriber (each gets its own queue), so a
-trigger reaches all open tabs and is never swallowed by a single stale
-connection. The registry lives on app.state.event_subscribers.
+All event payloads are JSON objects with a "type" key (see docs/api.md for the
+full contract). Fan-out is handled by src/services/event_broker.py — a
+module-level singleton so tools and background loops can push events too.
 """
 
 import asyncio
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends
 from sse_starlette.sse import EventSourceResponse
+
+from src.api.auth import get_user_id
+from src.services.event_broker import get_broker
 
 router = APIRouter()
 
 
-def _subscribers(request: Request) -> set:
-    return request.app.state.event_subscribers
-
-
-def broadcast_event(app, data: str) -> int:
-    """Fan out an event to every connected /events subscriber. Returns the count.
-
-    Must be called on the app's event loop (use loop.call_soon_threadsafe from
-    other threads, e.g. the in-process wake-word listener)."""
-    subscribers = app.state.event_subscribers
-    for queue in list(subscribers):
-        queue.put_nowait(data)
-    return len(subscribers)
-
-
 @router.get("/events")
-async def events(request: Request):
-    queue: asyncio.Queue = asyncio.Queue()
-    _subscribers(request).add(queue)
+async def events(user_id: str = Depends(get_user_id)):
+    broker = get_broker()
+    queue = broker.subscribe(user_id)
 
     async def event_generator():
         try:
             while True:
-                if await request.is_disconnected():
-                    break
                 try:
                     data = await asyncio.wait_for(queue.get(), timeout=5.0)
                     yield {"data": data}
                 except asyncio.TimeoutError:
                     yield {"comment": "heartbeat"}
         finally:
-            _subscribers(request).discard(queue)
+            broker.unsubscribe(queue)
 
     return EventSourceResponse(event_generator())
 
 
 @router.post("/trigger_voice")
-async def trigger_voice(request: Request):
-    count = broadcast_event(request.app, "start_voice")
+async def trigger_voice():
+    count = get_broker().broadcast({"type": "start_voice"})
     return {"status": "triggered", "subscribers": count}
 
 

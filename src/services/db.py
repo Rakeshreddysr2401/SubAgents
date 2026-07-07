@@ -25,6 +25,30 @@ CREATE TABLE IF NOT EXISTS chat_threads (
 );
 CREATE INDEX IF NOT EXISTS chat_threads_user_id_updated_at_idx
     ON chat_threads (user_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS reminders (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    due_at TIMESTAMPTZ NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',  -- pending | fired | cancelled
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    fired_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS reminders_status_due_idx ON reminders (status, due_at);
+CREATE INDEX IF NOT EXISTS reminders_user_due_idx ON reminders (user_id, due_at DESC);
+
+CREATE TABLE IF NOT EXISTS shopping_items (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    quantity TEXT,
+    purchased BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS shopping_items_user_idx
+    ON shopping_items (user_id, purchased, created_at DESC);
 """
 
 

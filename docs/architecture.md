@@ -105,6 +105,35 @@ The planner's own subgraph uses `PlannerAgentState(DeepAgentState)`, which adds
 `deepagents`' `todos`/filesystem channels on top of the same `agent_turn_visits`/
 `recalled_memories` extras the other agents' `VisualAgentState` carries.
 
+## Server-push events, reminders, guardian
+
+Beyond the per-request SSE chat stream, the app has a persistent, per-user
+push channel: `GET /events` (authenticated). All payloads are JSON with a
+`type` key (see [api.md](api.md) for the table); fan-out happens in the
+module-level `EventBroker` (`src/services/event_broker.py`) so tools and
+background loops can push without touching `app.state`. The React client owns
+exactly one subscription (`web/src/components/EventsBridge.tsx`) and
+dispatches by type into zustand stores (toasts, music player, guardian state,
+panel refresh bumps). Assistant replies, reminders and guardian alerts are
+spoken in the browser via speechSynthesis (`web/src/lib/tts.ts`); the host
+Mac's `say` is opt-in via `HOST_TTS_ENABLED`.
+
+Two lifespan-owned asyncio loops run alongside the server:
+
+- **Reminder scheduler** (`src/services/reminder_scheduler.py`): every
+  `REMINDER_POLL_SECONDS` it atomically claims due rows from `reminders`
+  (`UPDATE … WHERE status='pending' … RETURNING`, so overlapping ticks can't
+  double-fire) and pushes a `reminder` event to the owner.
+- **Guardian watcher** (`src/services/guardian.py`): for each user with
+  guardian mode on (Redis set), pulls the latest webcam frame and asks the
+  vision model whether anything looks concerning vs. the previous
+  observation; concerns become `guardian_alert` events, cooldown-limited.
+
+On Zomato (PRD wish): Zomato has no public API, so there is deliberately no
+fake integration — restaurant discovery beyond Swiggy goes through
+`cached_web_search`, and a future Zomato MCP server would plug into the same
+`load_swiggy_tools`/`apply_swiggy_tools` slot the Swiggy MCP uses.
+
 ## Persistence & data stores
 
 | Store | Holds | Owner |
@@ -112,7 +141,9 @@ The planner's own subgraph uses `PlannerAgentState(DeepAgentState)`, which adds
 | PostgreSQL | LangGraph checkpoints (thread state) | `AsyncPostgresSaver` |
 | PostgreSQL `users` | account email + bcrypt password hash | `src/services/user_store.py` |
 | PostgreSQL `chat_threads` | thread ownership, title, last-active — the sidebar's data | `src/services/thread_store.py` |
-| Redis | latest webcam frame (TTL), web-search exact cache, rate-limit counters, `refresh_token:<jti>` → user_id (revocable sessions) | `src/services/*` |
+| PostgreSQL `reminders` | scheduled reminders (pending/fired/cancelled) | `src/services/reminder_store.py` |
+| PostgreSQL `shopping_items` | per-user shopping list | `src/services/shopping_store.py` |
+| Redis | latest webcam frame (TTL), web-search exact cache, rate-limit counters, `refresh_token:<jti>` → user_id (revocable sessions), guardian-mode state, geocode cache | `src/services/*` |
 | Qdrant `documents` | uploaded-document chunks | RAG ingestion |
 | Qdrant `history` | turn summaries + webcam-frame descriptions | post-turn pipeline |
 | Qdrant `search_cache` | semantic web-search cache | `cached_web_search` |

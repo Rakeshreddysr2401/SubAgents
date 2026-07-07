@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     openai_model: str = Field("gpt-4o-mini", alias="OPENAI_MODEL")
     # Small/cheap model for background work: turn summaries, Mem0 extraction, frame descriptions
     utility_model: str = Field("gpt-4o-mini", alias="UTILITY_MODEL")
+    # Dedicated vision (VLM) endpoint — the mac-mini llama.cpp server. Vision
+    # consumers (guardian mode, frame analysis) always hit this, so the chat
+    # model can run anywhere (local Ollama, OpenAI) without losing vision.
+    # Empty values fall back to LLAMA_CPP_BASE_URL / SUPERVISOR_MODEL.
+    vision_llm_base_url: str = Field("", alias="VISION_LLM_BASE_URL")
+    vision_model: str = Field("", alias="VISION_MODEL")
 
     # --- Embeddings ---
     embedding_provider: Literal["openai", "ollama"] = Field("openai", alias="EMBEDDING_PROVIDER")
@@ -88,6 +94,23 @@ class Settings(BaseSettings):
     frame_ttl_seconds: int = Field(120, alias="FRAME_TTL_SECONDS")
     chat_timeout_seconds: int = Field(120, alias="CHAT_TIMEOUT_SECONDS")
     rate_limit_per_minute: int = Field(20, alias="RATE_LIMIT_PER_MINUTE")
+    # Speak replies through the host Mac's `say` command as well (the browser
+    # speaks via speechSynthesis regardless — this is only for the server box).
+    host_tts_enabled: bool = Field(False, alias="HOST_TTS_ENABLED")
+    # How often the reminder scheduler checks for due reminders.
+    reminder_poll_seconds: int = Field(15, alias="REMINDER_POLL_SECONDS")
+    # Guardian mode: how often to look at the camera, and the minimum gap
+    # between two alerts to the same user.
+    guardian_interval_seconds: int = Field(20, alias="GUARDIAN_INTERVAL_SECONDS")
+    guardian_alert_cooldown_seconds: int = Field(120, alias="GUARDIAN_ALERT_COOLDOWN_SECONDS")
+    # Internet-radio stations for the browser music player, as a JSON list of
+    # {"name", "url"} objects. Defaults to a couple of free public streams.
+    music_stations_json: str = Field(
+        '[{"name": "Groove Salad (SomaFM)", "url": "https://ice1.somafm.com/groovesalad-128-mp3"},'
+        ' {"name": "Radio Paradise", "url": "https://stream.radioparadise.com/mp3-128"},'
+        ' {"name": "Drone Zone (SomaFM)", "url": "https://ice1.somafm.com/dronezone-128-mp3"}]',
+        alias="MUSIC_STATIONS",
+    )
 
     # --- Wake word ---
     # Run the listener inside the server process (single command) vs. only via
@@ -111,6 +134,19 @@ class Settings(BaseSettings):
     swiggy_food_mcp_url: str = Field("https://mcp.swiggy.com/food", alias="SWIGGY_FOOD_MCP_URL")
     swiggy_access_token: str = Field("", alias="SWIGGY_ACCESS_TOKEN")
     mcp_load_timeout_seconds: int = Field(10, alias="MCP_LOAD_TIMEOUT_SECONDS")
+
+    @property
+    def music_stations(self) -> list[dict]:
+        """Parsed MUSIC_STATIONS; malformed JSON degrades to an empty list."""
+        import json
+
+        try:
+            stations = json.loads(self.music_stations_json)
+            if isinstance(stations, list):
+                return [s for s in stations if isinstance(s, dict) and s.get("name") and s.get("url")]
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return []
 
     @property
     def embedding_dim(self) -> int:

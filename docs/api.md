@@ -3,8 +3,8 @@
 Base URL: `http://localhost:2024`.
 
 **Auth**: when `AUTH_DISABLED=false` (see `docs/setup.md`), every endpoint below
-except `/auth/signup`, `/auth/login`, `/auth/refresh`, `/health`, and `/events`
-requires a session — either the httpOnly `access_token` cookie set by
+except `/auth/signup`, `/auth/login`, `/auth/refresh`, and `/health`
+requires a session (including `/events`, whose per-user routing depends on it) — either the httpOnly `access_token` cookie set by
 `/auth/login`/`/auth/signup`/`/auth/refresh`, or an `Authorization: Bearer <jwt>`
 header for non-browser clients (checked before the cookie). With
 `AUTH_DISABLED=true` (the dev default) every request maps to `default_user` and
@@ -80,8 +80,13 @@ Run a turn and stream the response as Server-Sent Events.
 **Query params**: `thread_id` (optional; a UUID is generated if omitted)
 **Body**:
 ```json
-{ "query": "order me a dosa", "always_speak": false }
+{ "query": "order me a dosa", "always_speak": false,
+  "location": { "lat": 12.9716, "lon": 77.5946, "accuracy_m": 20 } }
 ```
+
+`location` is optional (browser geolocation, sent when the user granted
+permission); it's exposed to tools as `config["configurable"]["location"]`
+and consumed by `get_current_location`.
 
 **SSE events** (each is a JSON object on a `data:` line):
 
@@ -164,12 +169,65 @@ attributed on the first `/chat` call for that thread).
 
 ## GET /events
 
-SSE channel the browser subscribes to for wake-word triggers. Emits
-`start_voice` when `/trigger_voice` is called; otherwise heartbeats.
+Authenticated SSE channel for server-push events, routed **per user** (a
+user's events never reach another user's browser). Every payload is a JSON
+object with a `type` key — clients must ignore unknown types (the contract is
+additive). Heartbeat comments keep the connection alive.
+
+| type | Emitted when | Extra fields |
+|---|---|---|
+| `start_voice` | wake word detected / `POST /trigger_voice` (broadcast to all) | — |
+| `reminder` | a reminder comes due | `reminder: {id, text, due_at}` |
+| `reminders_updated` | reminders changed (tool or REST) | — |
+| `shopping_updated` | shopping list changed (tool or REST) | — |
+| `music` | play_music / stop_music tool ran | `action: "play"\|"stop"`, `url`, `station` |
+| `guardian_alert` | guardian mode saw something concerning | `message`, `thread_id`, `at` |
+| `guardian_status` | guardian toggled / camera feed missing | `status: "enabled"\|"disabled"\|"no_frame"` |
 
 ## POST /trigger_voice
 
-Called by `wake_word.py`. Pushes a `start_voice` event onto `/events`.
+Called by `wake_word.py`. Pushes `{"type": "start_voice"}` onto `/events`.
+
+## Reminders
+
+- `GET /reminders` → the user's reminders (pending first, then recent past).
+  Each: `{id, text, due_at, status, created_at, fired_at}` with
+  `status ∈ pending|fired|cancelled`.
+- `DELETE /reminders/{id}` → cancel a pending reminder (404 otherwise).
+
+Creation is conversational (the `create_reminder` tool). A due reminder fires
+a `reminder` event; the browser shows a persistent toast and speaks it. The
+scheduler polls every `REMINDER_POLL_SECONDS` (default 15).
+
+## Shopping list
+
+- `GET /shopping` → `[{id, name, quantity, purchased, created_at}]`
+- `POST /shopping` `{name, quantity?}` → add an item
+- `PATCH /shopping/{id}` `{purchased}` → check/uncheck
+- `DELETE /shopping/{id}` → remove
+
+The assistant maintains the same list via tools (`add_shopping_item` etc.);
+every mutation from either side broadcasts `shopping_updated`.
+
+## Music
+
+- `GET /music/stations` → `{stations: [{name, url}]}` from `MUSIC_STATIONS`.
+
+Playback is browser-side (`<audio>` in the Music panel), driven by `music`
+events from the `play_music`/`stop_music` tools or the panel itself.
+
+## Guardian mode
+
+- `POST /guardian/enable` `{thread_id}` → start watching that thread's camera
+  frames (403 if the thread belongs to someone else).
+- `POST /guardian/disable`
+- `GET /guardian/status` → `{enabled, thread_id}`
+
+While enabled, the backend looks at the latest frame every
+`GUARDIAN_INTERVAL_SECONDS` (default 20) with the vision model and pushes a
+`guardian_alert` event when something looks genuinely concerning, with at most
+one alert per `GUARDIAN_ALERT_COOLDOWN_SECONDS` (default 120). If no frames
+are arriving it pushes `guardian_status: no_frame` once until frames resume.
 
 ## GET /health
 

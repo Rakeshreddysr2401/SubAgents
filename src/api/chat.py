@@ -229,7 +229,9 @@ def _stream_graph_events(
             return
 
         full_text = "".join(full)
-        if always_speak and full_text:
+        # Browser voice is handled client-side (speechSynthesis on `done`);
+        # the host Mac's `say` is opt-in for the server box only.
+        if always_speak and full_text and settings.host_tts_enabled:
             background_tasks.add_task(speak_out_loud, full_text)
         # Runs after the response completes: Mem0 write + history/vision indexing.
         # BackgroundTasks (not a bare create_task) so it isn't GC'd/cancelled.
@@ -250,7 +252,14 @@ async def chat(
     await enforce_rate_limit("chat", user_id)
     tid = validate_thread_id(thread_id or str(uuid4()))
     await request.app.state.thread_store.touch(tid, user_id, req.query[:FIRST_MESSAGE_MAX_CHARS])
-    config = {"configurable": {"thread_id": tid, "user_id": user_id}}
+    config = {
+        "configurable": {
+            "thread_id": tid,
+            "user_id": user_id,
+            # Browser geolocation (if granted) — read by get_current_location.
+            "location": req.location.model_dump() if req.location else None,
+        }
+    }
     inputs = {
         "messages": [HumanMessage(content=req.query)],
         "always_speak": req.always_speak,
