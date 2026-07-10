@@ -406,16 +406,23 @@ TRACKER_TOOLS   = [set_active_order]         # + _TRACKING_TOOL_NAMES whitelist
 
 ## Adding a New Agent
 
-1. `src/prompts/{name}.py` with `build_prompt() -> str`.
-2. Add the name constant + `AGENT_DESCRIPTIONS` entry in `src/commons/constants.py`.
-3. Add a `{NAME}_TOOLS` list in `src/tools/__init__.py`.
-4. In `src/graph/swarm.py`: build the agent with `_make_agent(...)` (or
-   `_make_planner_agent(...)`/`create_deep_agent(...)` if it's a deep agent), give it
-   the appropriate `transfer_to_*` handoff tools, add it to `create_swarm([...])`,
-   and add `transfer_to_<newname>` to the other agents that should reach it.
-5. Update the other agents' prompts with routing rules for the new agent.
-6. Add `PLANNER`-style entry to `_AGENT_NODES` in `src/api/chat.py` so sticky-routing
-   detection (the `agent` SSE event) covers the new node too.
+`src/graph/registry.py::AGENT_SPECS` is the single source of truth —
+`build_swarm_graph()` derives agents, tool sets and handoff wiring from it, and
+`src/api/chat.py`'s sticky-routing detection derives from `constants.AGENTS`.
+
+1. `src/prompts/{name}.py` with `build_prompt() -> str` (plus an
+   `UNAVAILABLE_NOTE` constant if the agent depends on an MCP provider).
+2. Add the name constant + `AGENTS` + `AGENT_DESCRIPTIONS` entries in
+   `src/commons/constants.py`.
+3. Add a `{NAME}_TOOLS` list in `src/tools/__init__.py` (and extend
+   `apply_mcp_tools` if it carries MCP tools).
+4. Add ONE `AgentSpec` entry to `AGENT_SPECS` (set `mcp_provider`, `vision`,
+   `deep`, `no_handoff_to` as needed) — every other agent automatically gets a
+   `transfer_to_<newname>` tool.
+5. Update the other agents' prompts with routing rules for the new agent
+   (LLM-facing text — the only step a table can't do).
+
+`tests/test_registry.py` fails if constants/descriptions/specs drift apart.
 
 ---
 

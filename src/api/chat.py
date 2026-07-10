@@ -31,7 +31,7 @@ from langgraph.types import Command
 
 from src.api.auth import get_user_id
 from src.api.deps import validate_thread_id
-from src.commons.constants import CONVERSATION, DINEOUT, INSTAMART, PLANNER, SWIGGY, TRACKER
+from src.commons.constants import AGENTS, CONVERSATION
 from src.configs.logging_config import get_logger
 from src.configs.settings import get_settings
 from src.memory.post_turn import run_post_turn
@@ -83,7 +83,9 @@ def _stream_text(chunk, meta: dict) -> str:
     return _chunk_text(chunk.content)
 
 
-_AGENT_NODES = {CONVERSATION, SWIGGY, INSTAMART, DINEOUT, TRACKER, PLANNER}
+# Agent node names come straight from the registry's source of truth — new
+# agents are covered by sticky-routing detection with no edit here.
+_AGENT_NODES = AGENTS
 
 
 def _extract_active_agent(update_payload) -> str | None:

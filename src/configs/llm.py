@@ -15,46 +15,17 @@ get_fallback_llm() — the configured cloud fallback (FALLBACK_LLM_*), or None.
                      its post-failure cooldown window.
 
 All construction goes through src/services/llm_registry.build_chat_model();
-these functions only resolve settings into a config dict.
+these functions only resolve settings into a config dict. Dependencies flow
+one way: configs/llm → services/llm_registry (never back).
 """
 
-from src.configs.settings import Settings, get_settings
-from src.services.llm_registry import build_chat_model
+from src.configs.settings import get_settings
+from src.services.llm_registry import build_chat_model, resolve_base_config
 
-# Sensible model defaults for cloud providers when LLM_MODEL is unset.
-_DEFAULT_CLOUD_MODELS = {
-    "anthropic": "claude-sonnet-4-5",
-    "gemini": "gemini-2.5-flash",
-}
-
-
-def resolve_base_config(s: Settings) -> dict:
-    """The global (agent-independent) model config from settings."""
-    provider = s.llm_provider
-    if s.llm_base_url:
-        base_url = s.llm_base_url
-    elif provider == "llama_cpp":
-        base_url = s.llama_cpp_base_url
-    elif provider == "ollama":
-        base_url = s.ollama_base_url
-    else:
-        base_url = ""
-    if s.llm_model:
-        model = s.llm_model
-    elif provider == "openai":
-        model = s.openai_model
-    else:
-        model = _DEFAULT_CLOUD_MODELS.get(provider, s.model_name)
-    api_key = s.llm_api_key
-    if not api_key and provider in ("llama_cpp", "ollama"):
-        api_key = "not-needed"
-    return {
-        "provider": provider,
-        "model": model,
-        "base_url": base_url,
-        "api_key": api_key,
-        "max_tokens": s.llm_max_tokens,
-    }
+__all__ = [
+    "get_llm", "get_utility_llm", "get_vision_llm", "get_fallback_llm",
+    "resolve_base_config",  # re-exported from llm_registry (canonical home)
+]
 
 
 def get_llm(agent: str | None = None, temperature: float = 0):

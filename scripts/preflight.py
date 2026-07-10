@@ -72,13 +72,13 @@ async def main() -> int:
         failures += 1
 
     # LLM + embeddings reuse the same probes as GET /system/preflight.
-    from src.api.system import _embeddings_preflight, _llm_preflight
+    from src.services.preflight import embeddings_preflight, llm_preflight
 
-    llm = await _llm_preflight()
+    llm = await llm_preflight()
     _line("llm", llm["ok"], f"{llm['provider']}/{llm['model']}: {llm['detail']}")
     failures += 0 if llm["ok"] else 1
 
-    emb = await _embeddings_preflight()
+    emb = await embeddings_preflight()
     _line("embeddings", emb["ok"], f"{emb['provider']}/{emb['model']}: {emb['detail']}")
     failures += 0 if emb["ok"] else 1
 

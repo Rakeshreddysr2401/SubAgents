@@ -36,6 +36,41 @@ _health_lock = threading.Lock()
 _primary_down_until: float = 0.0
 _fallback_used_total: int = 0
 
+# Sensible model defaults for cloud providers when LLM_MODEL is unset.
+_DEFAULT_CLOUD_MODELS = {
+    "anthropic": "claude-sonnet-4-5",
+    "gemini": "gemini-2.5-flash",
+}
+
+
+def resolve_base_config(s) -> dict:
+    """The global (agent-independent) model config from a Settings object."""
+    provider = s.llm_provider
+    if s.llm_base_url:
+        base_url = s.llm_base_url
+    elif provider == "llama_cpp":
+        base_url = s.llama_cpp_base_url
+    elif provider == "ollama":
+        base_url = s.ollama_base_url
+    else:
+        base_url = ""
+    if s.llm_model:
+        model = s.llm_model
+    elif provider == "openai":
+        model = s.openai_model
+    else:
+        model = _DEFAULT_CLOUD_MODELS.get(provider, s.model_name)
+    api_key = s.llm_api_key
+    if not api_key and provider in ("llama_cpp", "ollama"):
+        api_key = "not-needed"
+    return {
+        "provider": provider,
+        "model": model,
+        "base_url": base_url,
+        "api_key": api_key,
+        "max_tokens": s.llm_max_tokens,
+    }
+
 
 def build_chat_model(cfg: dict):
     """Build a chat model from a config dict.
@@ -176,7 +211,6 @@ def is_connection_error(exc: BaseException) -> bool:
 
 def status() -> dict:
     """Health-API view of the LLM layer (never contains keys/secrets)."""
-    from src.configs.llm import resolve_base_config
     from src.configs.settings import get_settings
 
     s = get_settings()
