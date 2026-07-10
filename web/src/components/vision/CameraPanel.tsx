@@ -163,6 +163,10 @@ export function CameraPanel({ threadId }: CameraPanelProps) {
       </div>
       <div className="video-viewport">
         <video ref={videoRef} autoPlay playsInline muted className={active ? "active" : ""} />
+        {/* Offscreen canvas: captureFrame() draws the video here to JPEG-encode
+            each frame before sending it over the WS. Without this element
+            canvasRef stays null and no frames are ever sent. */}
+        <canvas ref={canvasRef} style={{ display: "none" }} />
         {!active && (
           <div className="video-placeholder">
             <div className="icon-ring">
