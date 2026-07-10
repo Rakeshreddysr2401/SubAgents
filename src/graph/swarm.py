@@ -11,10 +11,13 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import (
     HumanInTheLoopMiddleware,
     ModelRequest,
+    SummarizationMiddleware,
     dynamic_prompt,
 )
 from langgraph.graph import StateGraph
 from langgraph_swarm import create_swarm
+
+from src.configs.settings import get_settings
 
 from src.commons.constants import (
     CONVERSATION,
@@ -25,7 +28,7 @@ from src.commons.constants import (
     SWIGGY,
     TRACKER,
 )
-from src.configs.llm import get_llm
+from src.configs.llm import get_llm, get_utility_llm
 from src.graph.handoff import create_guarded_handoff_tool
 from src.graph.middleware import (
     KeepOnlyLatestBridge,
@@ -73,6 +76,21 @@ def _make_prompt_middleware(base_prompt: str, mcp_provider: str | None = None,
     return prompt_with_memories
 
 
+def _summarization_middleware() -> SummarizationMiddleware | None:
+    """Long-thread compaction — the biggest reliability lever for small local
+    context windows. Uses the cheap utility model; a summarization event
+    rewrites history (one full slot re-prefill), which is rare and worth it.
+    """
+    s = get_settings()
+    if s.summarization_trigger_tokens <= 0:
+        return None
+    return SummarizationMiddleware(
+        model=get_utility_llm(),
+        trigger=("tokens", s.summarization_trigger_tokens),
+        keep=("messages", s.summarization_keep_messages),
+    )
+
+
 def _make_agent(name: str, tools: list, base_prompt: str, mcp_provider: str | None = None,
                 unavailable_note: str = ""):
     return create_agent(
@@ -85,6 +103,7 @@ def _make_agent(name: str, tools: list, base_prompt: str, mcp_provider: str | No
             # Outermost wrap_model_call hook: its retry/fallback re-runs the
             # inner request transforms (bridge pruning, clock).
             ResilientModelMiddleware(),
+            *([mw] if (mw := _summarization_middleware()) else []),
             KeepOnlyLatestBridge(),
             # Must sit INSIDE KeepOnlyLatestBridge: the clock is a trailing
             # SystemMessage the bridge pruner must never see.
@@ -114,12 +133,23 @@ def _make_planner_agent(tools: list, base_prompt: str):
     composes in front of deepagents' own default deep-agent prompt (which
     carries the write_todos/task usage instructions) instead of replacing it.
     """
+    subagents = _planner_subagents()
+    if subagents:
+        base_prompt = base_prompt + (
+            "\n\nFor research-heavy steps (comparing options, gathering facts, "
+            "reading the user's documents), use your task tool to delegate to "
+            "the `research` subagent instead of researching in this thread — "
+            "it returns a concise brief without bloating your context."
+        )
     return create_deep_agent(
         model=get_llm(PLANNER),
         tools=tools,
         system_prompt=base_prompt,
+        subagents=subagents or None,
         middleware=[
             ResilientModelMiddleware(),
+            # NO SummarizationMiddleware here: deepagents injects its own —
+            # adding ours trips create_agent's duplicate-middleware check.
             KeepOnlyLatestBridge(),
             # The planner's system_prompt is static, so the trailing-message
             # clock is what gives it a live clock at all.
@@ -129,6 +159,37 @@ def _make_planner_agent(tools: list, base_prompt: str):
         state_schema=PlannerAgentState,
         name=PLANNER,
     )
+
+
+def _planner_subagents() -> list[dict]:
+    """deepagents subagents for the planner's built-in `task` tool.
+
+    `research` runs on the cheap utility model with web + document search, so
+    planner research doesn't burn main-model context. Registered only when
+    web search is configured (its whole value is fresh information).
+    """
+    if not get_settings().tavily_api_key:
+        return []
+    from src.rag.retrieval_tools import search_documents
+    from src.rag.web_cache import cached_web_search
+
+    return [
+        {
+            "name": "research",
+            "description": (
+                "Researches a question using web search and the user's uploaded "
+                "documents, returning a concise factual brief with sources."
+            ),
+            "system_prompt": (
+                "You are a research assistant. Answer the question you're given "
+                "using cached_web_search and search_documents. Be thorough in "
+                "gathering, then respond with a CONCISE brief: key facts, "
+                "numbers, and source names only — no filler."
+            ),
+            "tools": [cached_web_search, search_documents],
+            "model": get_utility_llm(),
+        }
+    ]
 
 
 def build_swarm_graph() -> StateGraph:

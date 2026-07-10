@@ -18,6 +18,7 @@ import json
 import time
 
 from langchain_core.messages import HumanMessage
+from pydantic import BaseModel, Field
 
 from src.configs.logging_config import get_logger
 from src.configs.settings import get_settings
@@ -25,6 +26,14 @@ from src.services import redis_client
 from src.services.frame_buffer import get_latest_frame
 
 logger = get_logger(__name__)
+
+
+class GuardianVerdict(BaseModel):
+    """Structured verdict from the vision model — one look at the camera."""
+
+    observation: str = Field(description="One sentence: what you see now")
+    concern: bool = Field(description="True only if genuinely worth interrupting the user")
+    message: str = Field(default="", description="If concern: a short alert for the user")
 
 _ENABLED_SET = "guardian:enabled"
 
@@ -89,6 +98,22 @@ def _extract_json(text: str) -> dict | None:
         return None
 
 
+async def _get_verdict(llm, message) -> dict | None:
+    """Structured output when the model/server supports it (json_schema /
+    tool calling), else the tolerant plain-JSON parse — local VLM servers
+    vary widely in what they implement."""
+    try:
+        structured = llm.with_structured_output(GuardianVerdict)
+        verdict = await structured.ainvoke([message])
+        if isinstance(verdict, GuardianVerdict):
+            return verdict.model_dump()
+    except Exception as e:
+        logger.debug("Guardian structured output unavailable (%s) — falling back", e)
+    reply = await llm.ainvoke([message])
+    text = reply.content if isinstance(reply.content, str) else str(reply.content)
+    return _extract_json(text)
+
+
 async def _watch_one(user_id: str, broker, llm, now: float) -> None:
     redis = redis_client.get_redis()
     state = await guardian_state(user_id)
@@ -112,11 +137,9 @@ async def _watch_one(user_id: str, broker, llm, now: float) -> None:
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{frame}"}},
         ]
     )
-    reply = await llm.ainvoke([message])
-    text = reply.content if isinstance(reply.content, str) else str(reply.content)
-    parsed = _extract_json(text)
+    parsed = await _get_verdict(llm, message)
     if parsed is None:
-        logger.warning("Guardian: unparseable vision reply for user=%s: %.120s", user_id, text)
+        logger.warning("Guardian: unparseable vision reply for user=%s", user_id)
         return
 
     state["last_observation"] = str(parsed.get("observation") or "")[:300]

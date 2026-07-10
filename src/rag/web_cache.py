@@ -66,6 +66,9 @@ def _format(results: list[dict]) -> str:
 async def cached_web_search(query: str) -> str:
     """Search the web for current information. Results are cached to avoid
     repeated lookups of the same or similar queries."""
+    from src.tools.progress import emit_progress
+
+    emit_progress(f'Searching the web for "{query[:60]}"…')
     return await cached_search(query)
 
 

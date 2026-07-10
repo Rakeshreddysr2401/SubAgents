@@ -40,6 +40,48 @@ async def thread_messages(
     return {"thread_id": tid, "title": thread.title, "messages": messages}
 
 
+@router.get("/{thread_id}/checkpoints")
+async def thread_checkpoints(
+    thread_id: str, request: Request, user_id: str = Depends(rate_limited_user)
+):
+    """Turn-boundary checkpoints for time-travel ("edit & resend from here").
+
+    Returns one entry per completed turn (newest first). Re-running a turn =
+    POST /chat with `checkpoint_id` set to the checkpoint BEFORE the user
+    message being edited — LangGraph forks the thread from there natively.
+    """
+    tid = validate_thread_id(thread_id)
+    thread = await request.app.state.thread_store.get(tid)
+    if thread is None or thread.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    graph = request.app.state.graph
+    checkpoints: list[dict] = []
+    seen_counts: set[int] = set()
+    try:
+        async for snap in graph.aget_state_history(
+            {"configurable": {"thread_id": tid}}, limit=200
+        ):
+            if snap.next:  # mid-turn checkpoint — not a rewind target
+                continue
+            messages = (snap.values or {}).get("messages") or []
+            if len(messages) in seen_counts:
+                continue  # one checkpoint per turn boundary is enough
+            seen_counts.add(len(messages))
+            last = messages[-1] if messages else None
+            content = getattr(last, "content", "")
+            checkpoints.append({
+                "checkpoint_id": snap.config["configurable"]["checkpoint_id"],
+                "num_messages": len(messages),
+                "last_role": getattr(last, "type", None),
+                "last_preview": content[:120] if isinstance(content, str) else None,
+                "created_at": snap.created_at,
+            })
+    except Exception:
+        return {"thread_id": tid, "checkpoints": []}
+    return {"thread_id": tid, "checkpoints": checkpoints}
+
+
 @router.patch("/{thread_id}", response_model=ThreadOut)
 async def rename_thread(
     thread_id: str,

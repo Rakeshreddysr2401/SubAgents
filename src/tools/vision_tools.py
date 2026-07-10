@@ -18,6 +18,9 @@ async def capture_webcam(config: RunnableConfig) -> list:
 
     This tool returns the image data which you will then be able to 'see' and analyze.
     """
+    from src.tools.progress import emit_progress
+
+    emit_progress("Looking through the camera…")
     thread_id = config.get("configurable", {}).get("thread_id", "default")
 
     b64_frame = await get_latest_frame(thread_id)

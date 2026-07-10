@@ -5,6 +5,8 @@ SSE contract (each event is a JSON object on a `data:` line):
   {"agent": "<name>"}                                     0..n times, on active-agent change
   {"tool_call": {"id","name","args","agent"}}              0..n times
   {"tool_result": {"id","name","result_preview","agent"}}  0..n times
+  {"progress": "<human-readable step>"}                     0..n times, from
+                                                            long-running tools
   {"interrupt": {"id","action_requests","review_configs"}} 0..n times — a gated
                                                             tool call is awaiting
                                                             approval; no `done`
@@ -178,7 +180,10 @@ def _stream_graph_events(
         try:
             async with asyncio.timeout(settings.chat_timeout_seconds):
                 async for item in graph.astream(
-                    graph_input, config, stream_mode=["messages", "updates"], subgraphs=True
+                    graph_input,
+                    config,
+                    stream_mode=["messages", "updates", "custom"],
+                    subgraphs=True,
                 ):
                     # With list stream_mode + subgraphs=True: (namespace, mode, payload)
                     if len(item) == 3:
@@ -191,6 +196,12 @@ def _stream_graph_events(
                         if text:
                             full.append(text)
                             yield _sse({"delta": text})
+                    elif mode == "custom":
+                        # Long tools push progress lines via get_stream_writer()
+                        # (src/tools/progress.py). Additive event — old clients
+                        # ignore unknown keys.
+                        if isinstance(payload, dict) and payload.get("progress"):
+                            yield _sse({"progress": str(payload["progress"])[:200]})
                     elif mode == "updates":
                         interrupts = payload.get("__interrupt__") if isinstance(payload, dict) else None
                         if interrupts:
@@ -268,6 +279,10 @@ async def chat(
             "location": req.location.model_dump() if req.location else None,
         }
     }
+    if req.checkpoint_id:
+        # Time travel: run from this checkpoint instead of the thread tip —
+        # LangGraph forks the history natively ("edit & resend from here").
+        config["configurable"]["checkpoint_id"] = req.checkpoint_id
     inputs = {
         "messages": [HumanMessage(content=req.query)],
         "always_speak": req.always_speak,

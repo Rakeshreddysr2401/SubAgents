@@ -142,6 +142,11 @@ class Settings(BaseSettings):
 
     # --- Agents / runtime ---
     max_agent_visits: int = Field(3, alias="MAX_AGENT_VISITS")
+    # Long-thread compaction (SummarizationMiddleware): when an agent's
+    # history exceeds this many (approximate) tokens, older messages are
+    # folded into a summary. Sized for ~8k-context local models; 0 disables.
+    summarization_trigger_tokens: int = Field(6000, alias="SUMMARIZATION_TRIGGER_TOKENS")
+    summarization_keep_messages: int = Field(20, alias="SUMMARIZATION_KEEP_MESSAGES")
     frame_ttl_seconds: int = Field(120, alias="FRAME_TTL_SECONDS")
     chat_timeout_seconds: int = Field(120, alias="CHAT_TIMEOUT_SECONDS")
     rate_limit_per_minute: int = Field(20, alias="RATE_LIMIT_PER_MINUTE")

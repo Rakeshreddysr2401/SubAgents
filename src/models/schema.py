@@ -19,6 +19,9 @@ class ChatRequest(BaseModel):
     query: str
     always_speak: bool = False
     location: LocationIn | None = None
+    # Time travel: fork the thread from this checkpoint instead of appending
+    # to the tip (see GET /threads/{id}/checkpoints).
+    checkpoint_id: str | None = None
 
 
 class ResumeDecision(BaseModel):
