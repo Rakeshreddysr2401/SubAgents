@@ -2,8 +2,9 @@
 
 Runs once before the swarm. Searches Mem0 for memories relevant to the latest
 user message (scoped by user_id from the run config) and writes them into
-`recalled_memories`, which the agent prompts surface as
-"## What you remember about this user".
+`recalled_memories`, which LiveClockMiddleware surfaces to every agent as a
+trailing "## What you remember about this user" message (trailing — not in
+the system prompt — so the KV-cache prefix survives across turns).
 """
 
 from langchain_core.messages import HumanMessage

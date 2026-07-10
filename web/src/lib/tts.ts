@@ -87,7 +87,9 @@ export function speak(text: string): void {
     else clearKeepAlive();
   }, 10000);
 
-  speakNext();
+  // Chrome silently swallows an utterance queued in the same tick as
+  // cancel() — give the engine a beat to actually flush before speaking.
+  setTimeout(speakNext, 60);
 }
 
 export function stopSpeaking(): void {

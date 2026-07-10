@@ -31,9 +31,13 @@ llama-server -m your-model.gguf --host 0.0.0.0 --port 8080 --parallel 4 --jinja
   stays in the KV cache — without pinning, requests scatter across cold slots
   and re-prefill the whole prompt every call.
 - `--jinja` enables tool-call templates (required for agent tool use).
-- The prompt architecture is KV-cache-disciplined: the live clock is a
-  trailing message (never a prompt mutation), recalled memories change only
-  once per turn, and MCP tool schemas are frozen at startup.
+- The prompt architecture is KV-cache-disciplined: system prompts are static;
+  ALL per-turn context (recalled memories + the live clock) rides a single
+  trailing message so only the tail re-prefills; camera-frame image blocks are
+  stripped (stable placeholder) for every agent except conversation, so
+  text-only agents never pay frame token costs in their slots; MCP tool
+  schemas are frozen at startup. Net effect: returning to an agent re-prefills
+  only the messages that arrived since its last call.
 
 ## Per-agent overrides
 

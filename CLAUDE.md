@@ -102,19 +102,26 @@ START → recall_memories → assistant(swarm) → END
 - Conversation/swiggy/tracker built with `create_agent(get_llm(name), tools,
   middleware=[...], state_schema=VisualAgentState, name=...)` — passing the agent
   name to `get_llm` pins that agent's llama.cpp KV-cache slot (`LLM_SLOTS`) and
-  applies `AGENT_LLM_OVERRIDES`. Five middlewares per agent (all in
+  applies `AGENT_LLM_OVERRIDES`. Middlewares per agent (all in
   `src/graph/middleware.py`, each implementing **both** `wrap_model_call` and
   `awrap_model_call`), in this order:
-  - `dynamic_prompt` — appends recalled memories to the base prompt (once per turn).
+  - `dynamic_prompt` — the STATIC base prompt (+ the rare provider-unavailable
+    note). Nothing per-turn goes in here: prompt content invalidates the whole
+    llama.cpp KV prefix.
   - `ResilientModelMiddleware` — pi5-style fallback policy: primary in its 60s
     post-failure cooldown → route to `get_fallback_llm()` (FALLBACK_LLM_*);
     connection error → one retry, then cooldown + fallback; request-shaped error →
     no fallback; total failure → degraded `AIMessage` (never raises, SSE stays
     `delta`+`done`). Outermost wrapper so retries re-run the inner transforms.
+  - `SummarizationMiddleware` — long-thread compaction (not on the planner).
   - `KeepOnlyLatestBridge` — prunes stale handoff bridges.
-  - `LiveClockMiddleware` — appends the current time (minute-rounded) as a
-    **trailing SystemMessage** instead of mutating the prompt, so the llama.cpp
-    KV-cache prefix survives across calls. Must sit inside KeepOnlyLatestBridge.
+  - `StripImagesMiddleware` (all agents EXCEPT conversation) — replaces camera
+    image blocks with a stable text placeholder, request-only: text agents
+    never pay frame token costs in their KV slots; conversation keeps frames.
+  - `LiveClockMiddleware` — appends ALL per-turn context (recalled memories +
+    minute-rounded clock) as a **trailing SystemMessage**: only the tail
+    re-prefills each turn, the prompt + history prefix stays cached. Must sit
+    inside KeepOnlyLatestBridge.
   - `HumanInTheLoopMiddleware(interrupt_on=GATED_TOOL_NAMES)` — pauses on gated tool
     calls (see [Human-in-the-loop approvals](#human-in-the-loop-approvals)).
 - **Planner** built with `deepagents.create_deep_agent(model, tools, system_prompt=...,

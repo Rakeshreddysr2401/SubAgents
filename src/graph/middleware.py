@@ -56,7 +56,7 @@ class KeepOnlyLatestBridge(AgentMiddleware):
         return await handler(_prune_stale_bridges(request))
 
 
-# ── Live clock ──────────────────────────────────────────────────────────────
+# ── Trailing per-turn context: live clock + recalled memories ───────────────
 
 def _time_context() -> str:
     """A live clock line, evaluated fresh on every model call.
@@ -73,18 +73,32 @@ def _time_context() -> str:
 
 
 def _with_clock(request: ModelRequest) -> ModelRequest:
+    """Build the trailing SystemMessage: recalled memories + the live clock.
+
+    Everything that changes per turn goes HERE, at the very END of the
+    request, never into the system prompt: content at position 0 invalidates
+    the whole llama.cpp KV prefix, while a trailing message re-prefills only
+    the tail. (Memories used to live in the system prompt — that forced a
+    full slot re-prefill on every single turn.)
+    """
+    parts = []
+    memories = request.state.get("recalled_memories") or []
+    if memories:
+        parts.append(
+            "## What you remember about this user\n"
+            + "\n".join(f"- {m}" for m in memories)
+        )
+    parts.append(_time_context())
     return request.override(
-        messages=[*request.messages, SystemMessage(content=_time_context())]
+        messages=[*request.messages, SystemMessage(content="\n\n".join(parts))]
     )
 
 
 class LiveClockMiddleware(AgentMiddleware):
-    """Append the current time as a TRAILING SystemMessage, not a prompt edit.
+    """Append per-turn context (memories + time) as a TRAILING SystemMessage.
 
-    Mutating the system prompt per call invalidates the llama.cpp KV-cache
-    prefix on every model call; a trailing one-line message keeps the static
-    prompt + history prefix cached and re-prefills only the tail. The message
-    exists only in the model request — it is never persisted to graph state.
+    The message exists only in the model request — never persisted to state.
+    Must sit INSIDE KeepOnlyLatestBridge so the bridge pruner never sees it.
     """
 
     def wrap_model_call(self, request, handler):
@@ -92,6 +106,56 @@ class LiveClockMiddleware(AgentMiddleware):
 
     async def awrap_model_call(self, request, handler):
         return await handler(_with_clock(request))
+
+
+# ── Image stripping for text-only agents ────────────────────────────────────
+
+_IMAGE_PLACEHOLDER = (
+    "[camera frame omitted — this agent cannot see images; "
+    "transfer_to_conversation for visual questions]"
+)
+
+
+def _strip_image_blocks(request: ModelRequest) -> ModelRequest:
+    """Replace image blocks with a stable text placeholder.
+
+    Camera frames land in shared history (capture_webcam tool results). A
+    text-only agent (swiggy/instamart/dineout/tracker/planner) can't use
+    them, but would still pay their (huge) token cost on every prefill of its
+    KV slot. The placeholder is byte-identical across calls, so the stripped
+    history stays cache-stable.
+    """
+    changed = False
+    messages = []
+    for m in request.messages:
+        content = m.content
+        if isinstance(content, list) and any(
+            isinstance(b, dict) and b.get("type") == "image_url" for b in content
+        ):
+            blocks = [
+                b for b in content
+                if not (isinstance(b, dict) and b.get("type") == "image_url")
+            ]
+            blocks.append({"type": "text", "text": _IMAGE_PLACEHOLDER})
+            messages.append(m.model_copy(update={"content": blocks}))
+            changed = True
+        else:
+            messages.append(m)
+    return request.override(messages=messages) if changed else request
+
+
+class StripImagesMiddleware(AgentMiddleware):
+    """Drop image blocks from the request for agents that can't see.
+
+    Request-only (never persisted): the conversation agent still sees the
+    full frames when control returns to it.
+    """
+
+    def wrap_model_call(self, request, handler):
+        return handler(_strip_image_blocks(request))
+
+    async def awrap_model_call(self, request, handler):
+        return await handler(_strip_image_blocks(request))
 
 
 # ── Primary/fallback resilience ─────────────────────────────────────────────

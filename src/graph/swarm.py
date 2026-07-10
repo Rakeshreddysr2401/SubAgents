@@ -34,6 +34,7 @@ from src.graph.middleware import (
     KeepOnlyLatestBridge,
     LiveClockMiddleware,
     ResilientModelMiddleware,
+    StripImagesMiddleware,
 )
 from src.graph.state import PlannerAgentState, VisualAgentState, VisualAssistantState
 from src.prompts import conversation as conversation_prompt
@@ -46,34 +47,26 @@ from src.prompts import tracker as tracker_prompt
 
 def _make_prompt_middleware(base_prompt: str, mcp_provider: str | None = None,
                             unavailable_note: str = ""):
-    # NOTE: recalled memories change once per turn, so the dynamic prompt
-    # costs one KV-cache prefill per turn — acceptable. The live clock is
-    # deliberately NOT here (it changed per call): LiveClockMiddleware
-    # appends it as a trailing message so the prompt prefix stays cached.
+    # KV-cache discipline: the prompt must be STATIC across turns — anything
+    # per-turn (recalled memories, the live clock) goes into the trailing
+    # message appended by LiveClockMiddleware instead, so the prompt + history
+    # prefix stays cached in the agent's llama.cpp slot.
     #
-    # mcp_provider/unavailable_note: when the agent's MCP provider isn't
-    # serving tools (never configured, unreachable, or login expired), the
-    # note is appended so the model tells the user instead of flailing with
-    # the few non-MCP tools it has left (pi5's provider_ok prompt swap; the
-    # swap costs one prefill and only happens on expiry or re-login).
+    # mcp_provider/unavailable_note is the only dynamic part: when the agent's
+    # MCP provider isn't serving tools (never configured, unreachable, or
+    # login expired), the note is appended so the model tells the user instead
+    # of flailing with the few non-MCP tools it has left (pi5's provider_ok
+    # prompt swap; it costs one re-prefill and only fires on expiry/re-login).
     @dynamic_prompt
-    def prompt_with_memories(request: ModelRequest) -> str:
-        prompt = base_prompt
+    def agent_prompt(request: ModelRequest) -> str:
         if mcp_provider is not None:
             from src.services.mcp_providers import provider_ok
 
             if not provider_ok(mcp_provider):
-                prompt = prompt + unavailable_note
-        memories = request.state.get("recalled_memories") or []
-        if memories:
-            return (
-                prompt
-                + "\n\n## What you remember about this user\n"
-                + "\n".join(f"- {m}" for m in memories)
-            )
-        return prompt
+                return base_prompt + unavailable_note
+        return base_prompt
 
-    return prompt_with_memories
+    return agent_prompt
 
 
 def _summarization_middleware() -> SummarizationMiddleware | None:
@@ -92,7 +85,7 @@ def _summarization_middleware() -> SummarizationMiddleware | None:
 
 
 def _make_agent(name: str, tools: list, base_prompt: str, mcp_provider: str | None = None,
-                unavailable_note: str = ""):
+                unavailable_note: str = "", vision: bool = False):
     return create_agent(
         # get_llm(name) pins this agent's llama.cpp KV-cache slot (LLM_SLOTS)
         # and applies any per-agent provider/model override.
@@ -105,8 +98,11 @@ def _make_agent(name: str, tools: list, base_prompt: str, mcp_provider: str | No
             ResilientModelMiddleware(),
             *([mw] if (mw := _summarization_middleware()) else []),
             KeepOnlyLatestBridge(),
-            # Must sit INSIDE KeepOnlyLatestBridge: the clock is a trailing
-            # SystemMessage the bridge pruner must never see.
+            # Text-only agents never pay camera-frame token costs in their
+            # KV slots; the conversation agent keeps the real images.
+            *([] if vision else [StripImagesMiddleware()]),
+            # Must sit INSIDE KeepOnlyLatestBridge: the trailing per-turn
+            # context (memories + clock) must never look like a bridge.
             LiveClockMiddleware(),
             # Gates by tool name, so it's safe to attach to every agent even
             # though SWIGGY_TOOLS/TRACKER_TOOLS are currently the same list
@@ -151,8 +147,9 @@ def _make_planner_agent(tools: list, base_prompt: str):
             # NO SummarizationMiddleware here: deepagents injects its own —
             # adding ours trips create_agent's duplicate-middleware check.
             KeepOnlyLatestBridge(),
+            StripImagesMiddleware(),  # the planner is text-only too
             # The planner's system_prompt is static, so the trailing-message
-            # clock is what gives it a live clock at all.
+            # context (memories + clock) is what gives it a live clock at all.
             LiveClockMiddleware(),
             HumanInTheLoopMiddleware(interrupt_on=GATED_TOOL_NAMES),
         ],
@@ -216,6 +213,7 @@ def build_swarm_graph() -> StateGraph:
         CONVERSATION,
         [*CONVERSATION_TOOLS, to_swiggy, to_instamart, to_dineout, to_tracker, to_planner],
         conversation_prompt.build_prompt(),
+        vision=True,  # the only agent that sees camera frames
     )
     swiggy = _make_agent(
         SWIGGY,
