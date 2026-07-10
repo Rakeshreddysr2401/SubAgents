@@ -27,8 +27,10 @@ class Settings(BaseSettings):
 
     # --- LLM ---
     llm_provider: Literal["llama_cpp", "openai"] = Field("llama_cpp", alias="LLM_PROVIDER")
+    # Point at your LLM server (any OpenAI-compatible endpoint), e.g. a
+    # mac-mini on the LAN running `llama-server --parallel 4`.
     llama_cpp_base_url: str = Field(
-        "http://singireddys-mac-mini.local:8080/v1", alias="LLAMA_CPP_BASE_URL"
+        "http://localhost:8080/v1", alias="LLAMA_CPP_BASE_URL"
     )
     # Model name loaded in the llama.cpp server (legacy env name kept)
     model_name: str = Field("multimodal-model", alias="SUPERVISOR_MODEL")

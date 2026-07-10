@@ -12,6 +12,11 @@ wheels/
 # Environment variables (secrets)
 .env
 
+# OAuth / MCP tokens (secrets — never commit)
+.swiggy_tokens*.json
+*.tokens.json
+.subagents/
+
 # LangGraph runtime data
 .langgraph_api/
 

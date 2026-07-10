@@ -76,6 +76,11 @@ Open <http://localhost:2024> (or the Vite dev URL if using `npm run dev`). With
 to `false` to require real signup/login. Full setup (LLM/embedding options,
 auth, wake word) is in **[docs/setup.md](docs/setup.md)**.
 
+> **Security note**: a Swiggy OAuth token file (`.swiggy_tokens_food.json`) was
+> committed to this repo's history before v0.8 and has been removed from the
+> tree; git history still contains the old token, so it must be treated as
+> leaked — re-run the Swiggy login to rotate it. Token files are gitignored now.
+
 ---
 
 ## Architecture at a glance
