@@ -169,7 +169,8 @@ async def test_stale_bridge_messages_are_pruned(make_graph):
     bridges = [
         m
         for m in last_prompt[1:]  # skip the agent's own system prompt at index 0
-        if isinstance(m, SystemMessage)
+        # The trailing live-clock SystemMessage (LiveClockMiddleware) is not a bridge.
+        if isinstance(m, SystemMessage) and "Current date & time" not in m.content
     ]
     assert len(bridges) <= 1
     if bridges:

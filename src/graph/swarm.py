@@ -6,23 +6,24 @@ Sticky routing is swarm-native: the last active agent receives the next user
 turn directly. Handoffs chain within the same turn.
 """
 
-from datetime import datetime
-
 from deepagents import create_deep_agent
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
-    AgentMiddleware,
     HumanInTheLoopMiddleware,
     ModelRequest,
     dynamic_prompt,
 )
-from langchain_core.messages import SystemMessage
 from langgraph.graph import StateGraph
 from langgraph_swarm import create_swarm
 
 from src.commons.constants import CONVERSATION, GATED_TOOL_NAMES, PLANNER, SWIGGY, TRACKER
 from src.configs.llm import get_llm
 from src.graph.handoff import create_guarded_handoff_tool
+from src.graph.middleware import (
+    KeepOnlyLatestBridge,
+    LiveClockMiddleware,
+    ResilientModelMiddleware,
+)
 from src.graph.state import PlannerAgentState, VisualAgentState, VisualAssistantState
 from src.prompts import conversation as conversation_prompt
 from src.prompts import planner as planner_prompt
@@ -30,53 +31,14 @@ from src.prompts import swiggy as swiggy_prompt
 from src.prompts import tracker as tracker_prompt
 
 
-def _prune_stale_bridges(request: ModelRequest) -> ModelRequest:
-    """Drop stale handoff-bridge SystemMessages from history.
-
-    Bridges are the only SystemMessages inside `messages` (the agent's own
-    system prompt travels separately). Old bridges from earlier turns would
-    tell the model it is a *different* agent — keep only the most recent one.
-    """
-    system_indices = [
-        i for i, m in enumerate(request.messages) if isinstance(m, SystemMessage)
-    ]
-    if len(system_indices) > 1:
-        stale = set(system_indices[:-1])
-        pruned = [m for i, m in enumerate(request.messages) if i not in stale]
-        return request.override(messages=pruned)
-    return request
-
-
-class KeepOnlyLatestBridge(AgentMiddleware):
-    """Prune stale handoff-bridge SystemMessages (sync + async)."""
-
-    def wrap_model_call(self, request, handler):
-        return handler(_prune_stale_bridges(request))
-
-    async def awrap_model_call(self, request, handler):
-        return await handler(_prune_stale_bridges(request))
-
-
-def _time_context() -> str:
-    """A live clock line, evaluated fresh on every model call.
-
-    Agents need this to resolve relative times ("at 5", "tomorrow") into
-    absolute ISO-8601 datetimes for tools like create_reminder. Note: the
-    planner uses a static system_prompt (built once at graph build), so it
-    does NOT get a live clock — time-sensitive requests route through
-    conversation.
-    """
-    now = datetime.now().astimezone()
-    return (
-        f"\n\nCurrent date & time: {now.isoformat()} ({now.tzname()}). "
-        "Use this when interpreting relative times like 'at 5' or 'tomorrow'."
-    )
-
-
 def _make_prompt_middleware(base_prompt: str):
+    # NOTE: recalled memories change once per turn, so the dynamic prompt
+    # costs one KV-cache prefill per turn — acceptable. The live clock is
+    # deliberately NOT here (it changed per call): LiveClockMiddleware
+    # appends it as a trailing message so the prompt prefix stays cached.
     @dynamic_prompt
     def prompt_with_memories(request: ModelRequest) -> str:
-        prompt = base_prompt + _time_context()
+        prompt = base_prompt
         memories = request.state.get("recalled_memories") or []
         if memories:
             return (
@@ -91,11 +53,19 @@ def _make_prompt_middleware(base_prompt: str):
 
 def _make_agent(name: str, tools: list, base_prompt: str):
     return create_agent(
-        model=get_llm(),
+        # get_llm(name) pins this agent's llama.cpp KV-cache slot (LLM_SLOTS)
+        # and applies any per-agent provider/model override.
+        model=get_llm(name),
         tools=tools,
         middleware=[
             _make_prompt_middleware(base_prompt),
+            # Outermost wrap_model_call hook: its retry/fallback re-runs the
+            # inner request transforms (bridge pruning, clock).
+            ResilientModelMiddleware(),
             KeepOnlyLatestBridge(),
+            # Must sit INSIDE KeepOnlyLatestBridge: the clock is a trailing
+            # SystemMessage the bridge pruner must never see.
+            LiveClockMiddleware(),
             # Gates by tool name, so it's safe to attach to every agent even
             # though SWIGGY_TOOLS/TRACKER_TOOLS are currently the same list
             # object (src/tools/__init__.py) — a gated tool is caught no
@@ -122,11 +92,15 @@ def _make_planner_agent(tools: list, base_prompt: str):
     carries the write_todos/task usage instructions) instead of replacing it.
     """
     return create_deep_agent(
-        model=get_llm(),
+        model=get_llm(PLANNER),
         tools=tools,
         system_prompt=base_prompt,
         middleware=[
+            ResilientModelMiddleware(),
             KeepOnlyLatestBridge(),
+            # The planner's system_prompt is static, so the trailing-message
+            # clock is what gives it a live clock at all.
+            LiveClockMiddleware(),
             HumanInTheLoopMiddleware(interrupt_on=GATED_TOOL_NAMES),
         ],
         state_schema=PlannerAgentState,

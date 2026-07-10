@@ -90,11 +90,22 @@ START → recall_memories → assistant(swarm) → END
 
 ### Swarm (`swarm.py`)
 
-- Conversation/swiggy/tracker built with `create_agent(model, tools, middleware=[...],
-  state_schema=VisualAgentState, name=...)`. Three middlewares per agent:
-  - `dynamic_prompt` — appends recalled memories to the base prompt.
-  - `KeepOnlyLatestBridge` (subclass of `AgentMiddleware`, implements **both**
-    `wrap_model_call` and `awrap_model_call`) — prunes stale handoff bridges.
+- Conversation/swiggy/tracker built with `create_agent(get_llm(name), tools,
+  middleware=[...], state_schema=VisualAgentState, name=...)` — passing the agent
+  name to `get_llm` pins that agent's llama.cpp KV-cache slot (`LLM_SLOTS`) and
+  applies `AGENT_LLM_OVERRIDES`. Five middlewares per agent (all in
+  `src/graph/middleware.py`, each implementing **both** `wrap_model_call` and
+  `awrap_model_call`), in this order:
+  - `dynamic_prompt` — appends recalled memories to the base prompt (once per turn).
+  - `ResilientModelMiddleware` — pi5-style fallback policy: primary in its 60s
+    post-failure cooldown → route to `get_fallback_llm()` (FALLBACK_LLM_*);
+    connection error → one retry, then cooldown + fallback; request-shaped error →
+    no fallback; total failure → degraded `AIMessage` (never raises, SSE stays
+    `delta`+`done`). Outermost wrapper so retries re-run the inner transforms.
+  - `KeepOnlyLatestBridge` — prunes stale handoff bridges.
+  - `LiveClockMiddleware` — appends the current time (minute-rounded) as a
+    **trailing SystemMessage** instead of mutating the prompt, so the llama.cpp
+    KV-cache prefix survives across calls. Must sit inside KeepOnlyLatestBridge.
   - `HumanInTheLoopMiddleware(interrupt_on=GATED_TOOL_NAMES)` — pauses on gated tool
     calls (see [Human-in-the-loop approvals](#human-in-the-loop-approvals)).
 - **Planner** built with `deepagents.create_deep_agent(model, tools, system_prompt=...,
@@ -407,9 +418,14 @@ TRACKER_TOOLS = []                     # MCP tools at startup
   `[*_SWIGGY_BASE_TOOLS, *mcp_tools]`; a plain `SWIGGY_TOOLS[:] = mcp_tools`
   silently wipes the shopping/location tools registered at import time
   (guarded by `tests/test_shopping_tools.py::test_apply_swiggy_tools_keeps_base_tools`).
-- **The planner has no live clock** — it uses a static `system_prompt`, so the
-  per-model-call time injection (conversation/swiggy/tracker only) doesn't reach
-  it. Time-sensitive requests (reminders) route through conversation.
+- **The live clock is a trailing message, not a prompt edit** — every agent
+  (planner included) gets `LiveClockMiddleware`'s minute-rounded trailing
+  SystemMessage. Don't move the clock back into the dynamic prompt: per-call
+  prompt mutation invalidates the llama.cpp KV-cache prefix on every call.
+- **LLM providers**: `LLM_PROVIDER` ∈ llama_cpp | openai | anthropic | gemini |
+  ollama, built via `src/services/llm_registry.build_chat_model()`. Slot pinning
+  (`LLM_SLOTS`) applies only to llama_cpp. `max_retries=0` on OpenAI-compatible
+  clients is deliberate — retry policy lives in `ResilientModelMiddleware`.
 - **`EventBroker.broadcast` is loop-affine** — like the old fan-out, it must run
   on the app's event loop; background threads bridge with
   `loop.call_soon_threadsafe` (wake-word listener does this).

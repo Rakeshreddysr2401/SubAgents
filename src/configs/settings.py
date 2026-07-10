@@ -4,11 +4,12 @@ Every module should use `get_settings()` instead of scattered `os.getenv` calls.
 Values load from the process environment first, then `.env`.
 """
 
+import json
 from functools import lru_cache
 from typing import Literal, Optional
 
 from dotenv import load_dotenv
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Populate os.environ from .env so third-party libs (OpenAI, Tavily, …) that
@@ -26,7 +27,37 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # --- LLM ---
-    llm_provider: Literal["llama_cpp", "openai"] = Field("llama_cpp", alias="LLM_PROVIDER")
+    # llama_cpp = any OpenAI-compatible self-hosted server (llama.cpp, vLLM,
+    # LM Studio, …); "llamacpp" is accepted as an alias.
+    llm_provider: Literal["llama_cpp", "openai", "anthropic", "gemini", "ollama"] = Field(
+        "llama_cpp", alias="LLM_PROVIDER"
+    )
+    # Generic overrides that win for any provider. Empty = derive from the
+    # provider-specific legacy fields below.
+    llm_base_url: str = Field("", alias="LLM_BASE_URL")
+    llm_model: str = Field("", alias="LLM_MODEL")
+    llm_api_key: str = Field("", alias="LLM_API_KEY")
+    llm_max_tokens: Optional[int] = Field(None, alias="LLM_MAX_TOKENS")
+    # Per-agent llama.cpp KV-cache slot pinning (server needs --parallel N).
+    # Each agent's requests land on its own slot so the static prompt prefix
+    # stays cached — without pinning, a multi-slot server scatters requests
+    # across cold slots and re-prefills the whole prompt every call.
+    # JSON {agent_name: slot}; -1 or absent = no pin. Applied only when
+    # llm_provider=llama_cpp.
+    llm_slots_json: str = Field(
+        '{"conversation": 0, "swiggy": 1, "tracker": 2, "planner": 3}',
+        alias="LLM_SLOTS",
+    )
+    # Per-agent full overrides: JSON {agent: {provider?, model?, base_url?,
+    # api_key?, max_tokens?, slot?}}. Lets one agent run on a different
+    # provider/model without disturbing the others.
+    agent_llm_overrides_json: str = Field("{}", alias="AGENT_LLM_OVERRIDES")
+    # Cloud fallback: used automatically while the primary LLM is in its
+    # post-failure cooldown window. Empty provider/model = no fallback.
+    fallback_llm_provider: str = Field("", alias="FALLBACK_LLM_PROVIDER")
+    fallback_llm_model: str = Field("", alias="FALLBACK_LLM_MODEL")
+    fallback_llm_api_key: str = Field("", alias="FALLBACK_LLM_API_KEY")
+    fallback_llm_base_url: str = Field("", alias="FALLBACK_LLM_BASE_URL")
     # Point at your LLM server (any OpenAI-compatible endpoint), e.g. a
     # mac-mini on the LAN running `llama-server --parallel 4`.
     llama_cpp_base_url: str = Field(
@@ -37,10 +68,14 @@ class Settings(BaseSettings):
     openai_model: str = Field("gpt-4o-mini", alias="OPENAI_MODEL")
     # Small/cheap model for background work: turn summaries, Mem0 extraction, frame descriptions
     utility_model: str = Field("gpt-4o-mini", alias="UTILITY_MODEL")
-    # Dedicated vision (VLM) endpoint — the mac-mini llama.cpp server. Vision
-    # consumers (guardian mode, frame analysis) always hit this, so the chat
-    # model can run anywhere (local Ollama, OpenAI) without losing vision.
-    # Empty values fall back to LLAMA_CPP_BASE_URL / SUPERVISOR_MODEL.
+    # Dedicated vision (VLM) endpoint — e.g. a mac-mini llama.cpp server.
+    # Vision consumers (guardian mode, frame analysis) always hit this, so the
+    # chat model can run anywhere without losing vision. Empty provider means
+    # "OpenAI-compatible" (llama.cpp); empty URL/model fall back to
+    # LLAMA_CPP_BASE_URL / SUPERVISOR_MODEL.
+    vision_llm_provider: Literal["", "llama_cpp", "openai", "anthropic", "gemini", "ollama"] = (
+        Field("", alias="VISION_LLM_PROVIDER")
+    )
     vision_llm_base_url: str = Field("", alias="VISION_LLM_BASE_URL")
     vision_model: str = Field("", alias="VISION_MODEL")
 
@@ -137,11 +172,37 @@ class Settings(BaseSettings):
     swiggy_access_token: str = Field("", alias="SWIGGY_ACCESS_TOKEN")
     mcp_load_timeout_seconds: int = Field(10, alias="MCP_LOAD_TIMEOUT_SECONDS")
 
+    @field_validator("llm_provider", "vision_llm_provider", mode="before")
+    @classmethod
+    def _normalize_provider(cls, v):
+        # pi5-style spelling accepted as an alias.
+        return "llama_cpp" if v == "llamacpp" else v
+
+    @property
+    def llm_slots(self) -> dict[str, int]:
+        """Parsed LLM_SLOTS; malformed JSON degrades to no pinning."""
+        try:
+            slots = json.loads(self.llm_slots_json)
+            if isinstance(slots, dict):
+                return {k: int(v) for k, v in slots.items() if int(v) >= 0}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
+        return {}
+
+    @property
+    def agent_llm_overrides(self) -> dict[str, dict]:
+        """Parsed AGENT_LLM_OVERRIDES; malformed JSON degrades to no overrides."""
+        try:
+            overrides = json.loads(self.agent_llm_overrides_json)
+            if isinstance(overrides, dict):
+                return {k: v for k, v in overrides.items() if isinstance(v, dict)}
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return {}
+
     @property
     def music_stations(self) -> list[dict]:
         """Parsed MUSIC_STATIONS; malformed JSON degrades to an empty list."""
-        import json
-
         try:
             stations = json.loads(self.music_stations_json)
             if isinstance(stations, list):
