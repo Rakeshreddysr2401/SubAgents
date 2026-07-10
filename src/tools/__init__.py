@@ -5,6 +5,7 @@ from src.tools.guardian_tools import disable_guardian, enable_guardian
 from src.tools.location_tools import get_current_location
 from src.tools.music_tools import list_music_stations, play_music, stop_music
 from src.tools.news_tools import get_latest_news
+from src.tools.order_tools import set_active_order
 from src.tools.shopping_tools import (
     add_shopping_item,
     list_shopping_items,
@@ -44,21 +45,52 @@ CONVERSATION_TOOLS = [
     *_WEB_TOOLS,
 ]
 
-# Non-MCP tools the swiggy agent always carries. apply_swiggy_tools() COMPOSES
-# these with the MCP tools (it must never plain-overwrite SWIGGY_TOOLS, or
+# Non-MCP tools the ordering agents always carry. apply_mcp_tools() COMPOSES
+# these with the MCP tools (it must never plain-overwrite the lists, or
 # everything registered at import time would be silently wiped at startup).
-_SWIGGY_BASE_TOOLS = [*SHOPPING_TOOLS, get_current_location]
+_SWIGGY_BASE_TOOLS = [*SHOPPING_TOOLS, get_current_location, set_active_order]
+_INSTAMART_BASE_TOOLS = [*SHOPPING_TOOLS, get_current_location, set_active_order]
 
 SWIGGY_TOOLS = [*_SWIGGY_BASE_TOOLS]
+INSTAMART_TOOLS = [*_INSTAMART_BASE_TOOLS]
+DINEOUT_TOOLS = []
 
-TRACKER_TOOLS = []
+# The food and instamart MCP servers SHARE several tool names (get_addresses,
+# confirm_order, get_payment_options, …), so the tracker can't carry both full
+# sets — one ToolNode would hold ambiguous duplicates. This read-only tracking
+# subset doesn't collide; ordering tools stay with the owning agent.
+_TRACKING_TOOL_NAMES = {
+    "get_food_orders", "get_food_order_details",           # food
+    "track_food_order", "get_food_delivery_status",
+    "get_orders", "track_order", "get_delivery_status",    # instamart
+}
+
+TRACKER_TOOLS = [set_active_order]
 
 
-def apply_swiggy_tools(mcp_tools: list) -> None:
-    """Inject Swiggy MCP tools (loaded async at startup) into the shared tool sets.
+def apply_mcp_tools(
+    food_tools: list, instamart_tools: list | None = None, dineout_tools: list | None = None
+) -> None:
+    """Inject MCP tools (loaded async at startup) into the shared tool sets.
 
     Mutates the lists in place; the graph must be built AFTER this runs so the
     agents snapshot the full lists. Idempotent.
     """
-    SWIGGY_TOOLS[:] = [*_SWIGGY_BASE_TOOLS, *mcp_tools]
-    TRACKER_TOOLS[:] = list(mcp_tools)
+    instamart_tools = instamart_tools or []
+    dineout_tools = dineout_tools or []
+    SWIGGY_TOOLS[:] = [*_SWIGGY_BASE_TOOLS, *food_tools]
+    INSTAMART_TOOLS[:] = [*_INSTAMART_BASE_TOOLS, *instamart_tools]
+    DINEOUT_TOOLS[:] = list(dineout_tools)
+    TRACKER_TOOLS[:] = [
+        set_active_order,
+        *(
+            t
+            for t in [*food_tools, *instamart_tools]
+            if getattr(t, "name", None) in _TRACKING_TOOL_NAMES
+        ),
+    ]
+
+
+def apply_swiggy_tools(mcp_tools: list) -> None:
+    """Legacy alias: food-only injection (kept for older call sites/tests)."""
+    apply_mcp_tools(mcp_tools)

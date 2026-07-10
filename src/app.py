@@ -82,18 +82,26 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("Mem0 unavailable — long-term memory disabled: %s", e)
 
-        # Load MCP tools asynchronously (no more import-time asyncio.run)
-        from src.tools import apply_swiggy_tools
-        from src.tools.swiggy_mcp import load_swiggy_tools
+        # Load MCP provider tools asynchronously (no import-time network).
+        # No token → each provider yields [] with zero network calls.
+        from src.services.mcp_providers import load_provider_tools
+        from src.tools import apply_mcp_tools
 
-        swiggy_tools = await load_swiggy_tools()
-        apply_swiggy_tools(swiggy_tools)
-        for t in swiggy_tools:
-            # One-time enumeration so cart-mutation/order-placement tool names
-            # can be identified and added to GATED_TOOL_NAMES (src/commons/
-            # constants.py) — not visible in source since these load
-            # dynamically from the remote Swiggy MCP server.
-            logger.info("Swiggy MCP tool available: %s", t.name)
+        food_tools = await load_provider_tools("swiggy_food")
+        instamart_tools = await load_provider_tools("swiggy_instamart")
+        dineout_tools = await load_provider_tools("swiggy_dineout")
+        apply_mcp_tools(food_tools, instamart_tools, dineout_tools)
+        for provider, tools in (
+            ("swiggy_food", food_tools),
+            ("swiggy_instamart", instamart_tools),
+            ("swiggy_dineout", dineout_tools),
+        ):
+            for t in tools:
+                # One-time enumeration so cart-mutation/order-placement tool
+                # names can be identified and added to GATED_TOOL_NAMES
+                # (src/commons/constants.py) — not visible in source since
+                # these load dynamically from the remote MCP servers.
+                logger.info("MCP tool available (%s): %s", provider, t.name)
 
         # Build the graph with real persistence (after MCP tools are applied)
         from src.graph.build import build_graph

@@ -29,11 +29,12 @@ from langgraph.types import Command
 
 from src.api.auth import get_user_id
 from src.api.deps import validate_thread_id
-from src.commons.constants import CONVERSATION, PLANNER, SWIGGY, TRACKER
+from src.commons.constants import CONVERSATION, DINEOUT, INSTAMART, PLANNER, SWIGGY, TRACKER
 from src.configs.logging_config import get_logger
 from src.configs.settings import get_settings
 from src.memory.post_turn import run_post_turn
 from src.models.schema import ChatRequest, ResumeRequest
+from src.services.mcp_providers import refresh_tokens_if_changed
 from src.services.rate_limit import enforce_rate_limit
 from src.tools.audio_tools import speak_out_loud
 
@@ -79,7 +80,7 @@ def _stream_text(chunk, meta: dict) -> str:
     return _chunk_text(chunk.content)
 
 
-_AGENT_NODES = {CONVERSATION, SWIGGY, TRACKER, PLANNER}
+_AGENT_NODES = {CONVERSATION, SWIGGY, INSTAMART, DINEOUT, TRACKER, PLANNER}
 
 
 def _extract_active_agent(update_payload) -> str | None:
@@ -250,6 +251,9 @@ async def chat(
     user_id: str = Depends(get_user_id),
 ):
     await enforce_rate_limit("chat", user_id)
+    # Pick up a Swiggy re-login without restarting (one os.stat; headers
+    # stay stable within the turn).
+    refresh_tokens_if_changed()
     tid = validate_thread_id(thread_id or str(uuid4()))
     await request.app.state.thread_store.touch(tid, user_id, req.query[:FIRST_MESSAGE_MAX_CHARS])
     config = {
@@ -288,6 +292,7 @@ async def chat_resume(
     handling for the nesting.
     """
     await enforce_rate_limit("chat", user_id)
+    refresh_tokens_if_changed()
     tid = validate_thread_id(thread_id)
     thread = await request.app.state.thread_store.get(tid)
     if thread is None or thread.user_id != user_id:

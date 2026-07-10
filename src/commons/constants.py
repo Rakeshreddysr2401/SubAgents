@@ -1,14 +1,18 @@
 CONVERSATION = "conversation"
 SWIGGY = "swiggy"
+INSTAMART = "instamart"
+DINEOUT = "dineout"
 TRACKER = "tracker"
 PLANNER = "planner"
 
-AGENTS = {CONVERSATION, SWIGGY, TRACKER, PLANNER}
+AGENTS = {CONVERSATION, SWIGGY, INSTAMART, DINEOUT, TRACKER, PLANNER}
 
 AGENT_DESCRIPTIONS = {
     CONVERSATION: "general conversation, web search, system info, and visual/webcam tasks",
-    SWIGGY: "food ordering, restaurant search, menu browsing, cart management, and order placement",
-    TRACKER: "delivery status and order tracking",
+    SWIGGY: "restaurant food ordering: search, menus, cart management, and order placement",
+    INSTAMART: "grocery and household-essentials ordering (Swiggy Instamart quick commerce)",
+    DINEOUT: "dine-in restaurant discovery and table reservations (Swiggy Dineout)",
+    TRACKER: "delivery status and order tracking (food and grocery)",
     PLANNER: "decomposing complex multi-step requests that span several specialists into a tracked plan",
 }
 
@@ -16,11 +20,13 @@ AGENT_DESCRIPTIONS = {
 # HumanInTheLoopMiddleware wiring and src/api/chat.py's interrupt handling).
 # `True` allows the full approve/edit/reject/respond decision set.
 #
-# Swiggy MCP's cart-mutation/order-placement tool names aren't visible in
-# source (loaded dynamically at runtime from the remote MCP server, see
-# src/tools/swiggy_mcp.py) — src/app.py logs each loaded tool's name at
-# startup so they can be enumerated and added here once the MCP server is
-# reachable.
+# Gating is by tool name and agent-agnostic, so `confirm_order` (the shared
+# order-placement name on both the food and instamart MCP servers) is caught
+# no matter which agent calls it — this is the spend guardrail: enforcement
+# at the tool boundary, not in prompts. src/app.py logs every loaded MCP
+# tool's name at startup so further cart-mutation names can be enumerated and
+# added once the MCP servers are reachable.
 GATED_TOOL_NAMES: dict[str, bool] = {
     "open_mac_app": True,
+    "confirm_order": True,
 }
