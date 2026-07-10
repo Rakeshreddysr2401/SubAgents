@@ -30,7 +30,14 @@ export function MessageBubble({ role, content, thinking, progressText, toolActiv
 
   return (
     <div className={`message ${role}`}>
-      <div className="avatar">{role === "user" ? "U" : "S"}</div>
+      <div className="avatar">
+        {role === "user" ? "U" : (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-label="Assistant">
+            <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
+            <path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z" />
+          </svg>
+        )}
+      </div>
       {role === "user" ? (
         <>
           {onRewind && (

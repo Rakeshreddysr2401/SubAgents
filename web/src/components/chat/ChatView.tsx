@@ -15,7 +15,7 @@ import { useChatStream } from "../../state/chatStream";
 import { useThreads } from "../../hooks/useThreads";
 import { ThreadSidebar } from "../sidebar/ThreadSidebar";
 import { MessageBubble, type ChatMessage } from "./MessageBubble";
-import { AgentBadge } from "./AgentBadge";
+import { AgentDock } from "./AgentDock";
 import { InterruptCard } from "./InterruptCard";
 import { PlanCard } from "./PlanCard";
 import { Composer } from "./Composer";
@@ -32,7 +32,20 @@ import { speak } from "../../lib/tts";
 import { getLocation } from "../../lib/geolocation";
 import "./ChatLayout.css";
 
-const HINTS = ["What can you do?", "Help me with a task", "Tell me about yourself"];
+const HINTS = [
+  "What can you do?",
+  "What's in front of the camera?",
+  "Order me something to eat",
+  "Remind me to stretch in an hour",
+];
+
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 5) return "Up late?";
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
+}
 
 function newId(): string {
   return crypto.randomUUID();
@@ -309,6 +322,7 @@ export function ChatView() {
 
   return (
     <div className="app-shell">
+      <div className="aurora" aria-hidden />
       <EventsBridge />
       <ToastStack />
       <div className="header">
@@ -320,16 +334,16 @@ export function ChatView() {
               <path d="M2 12l10 5 10-5" />
             </svg>
           </div>
-          <h1>SubAgents</h1>
+          <h1>Sub<span className="wordmark-accent">Agents</span></h1>
         </div>
+        <AgentDock activeAgent={activeAgent} />
         <div className="header-right">
           <div className="header-pill">
-            <span style={{ fontSize: 10 }}>VOICE:</span>
+            <span style={{ fontSize: 10 }}>VOICE</span>
             <button className="btn-tiny" onClick={() => setAlwaysSpeak((v) => !v)} type="button">
               {alwaysSpeak ? "ON" : "OFF"}
             </button>
           </div>
-          <AgentBadge agent={activeAgent} />
           <WakeWordIndicator />
           <VoiceWaveform />
           <ThemeToggle />
@@ -389,13 +403,12 @@ export function ChatView() {
               <div className="welcome">
                 <div className="welcome-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                    <path d="M2 17l10 5 10-5" />
-                    <path d="M2 12l10 5 10-5" />
+                    <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.5 1.5M16.9 16.9l1.5 1.5M5.6 18.4l1.5-1.5M16.9 7.1l1.5-1.5" />
+                    <circle cx="12" cy="12" r="4" />
                   </svg>
                 </div>
-                <h2>SubAgents</h2>
-                <p>Your multi-agent AI assistant.<br />Try one of these to get started:</p>
+                <h2>{greeting()}.</h2>
+                <p>Six agents, your camera, your voice — all on your own hardware.<br />Ask anything, or try one of these:</p>
                 <div className="welcome-hints">
                   {HINTS.map((hint) => (
                     <button key={hint} className="hint-chip" onClick={() => sendMessage(hint)} type="button">

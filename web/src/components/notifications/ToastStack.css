@@ -15,22 +15,22 @@
   gap: 10px;
   padding: 12px 14px;
   border-radius: 12px;
-  background: var(--surface, #1c1e26);
-  border: 1px solid var(--border, #2e3140);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  background: var(--surface-solid);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
   animation: toast-in 0.25s ease-out;
 }
 
 .toast-reminder {
-  border-left: 3px solid #f5b14c;
+  border-left: 3px solid var(--amber-400);
 }
 
 .toast-guardian {
-  border-left: 3px solid #e35d6a;
+  border-left: 3px solid var(--danger);
 }
 
 .toast-info {
-  border-left: 3px solid #5c8dff;
+  border-left: 3px solid var(--primary);
 }
 
 .toast-icon {

@@ -34,11 +34,22 @@ export function VoiceWaveform() {
           if (!ctx || !canvas) return;
           analyser.getByteFrequencyData(data);
           ctx.clearRect(0, 0, canvas.width, canvas.height);
+          // Rounded bars mirrored around the vertical center, tinted with
+          // the signature cyan→violet spectrum.
+          const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+          gradient.addColorStop(0, "#22d3ee");
+          gradient.addColorStop(0.55, "#818cf8");
+          gradient.addColorStop(1, "#c084fc");
+          ctx.fillStyle = gradient;
           const barWidth = canvas.width / data.length;
+          const mid = canvas.height / 2;
           for (let i = 0; i < data.length; i++) {
-            const barHeight = (data[i] / 255) * canvas.height;
-            ctx.fillStyle = "#6366f1";
-            ctx.fillRect(i * barWidth, canvas.height - barHeight, Math.max(barWidth - 1, 1), barHeight);
+            const barHeight = Math.max((data[i] / 255) * canvas.height, 2);
+            const w = Math.max(barWidth - 2, 1.5);
+            const x = i * barWidth;
+            ctx.beginPath();
+            ctx.roundRect(x, mid - barHeight / 2, w, barHeight, w / 2);
+            ctx.fill();
           }
           rafRef.current = requestAnimationFrame(draw);
         };

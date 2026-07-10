@@ -3,7 +3,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle at 20% 20%, #eef0ff 0%, var(--bg) 55%);
+  background: var(--bg);
   padding: 20px;
 }
 
@@ -11,13 +11,15 @@
   width: 100%;
   max-width: 400px;
   background: var(--surface);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   border-radius: var(--radius-lg);
-  box-shadow: 0 20px 50px rgba(30, 41, 59, 0.12);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
   border: 1px solid var(--border);
 }
 .auth-card-header {
-  background: var(--header-bg);
+  background: var(--accent-grad);
   padding: 32px 32px 26px;
   text-align: center;
   color: #fff;
@@ -54,10 +56,10 @@
 
 .auth-submit {
   margin-top: 4px;
-  background: linear-gradient(135deg, #6366f1, #818cf8);
+  background: var(--accent-grad);
   border: none; color: #fff; font-size: 13.5px; font-weight: 700;
   padding: 11px 0; border-radius: 11px; cursor: pointer; transition: all 0.2s;
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3);
+  box-shadow: var(--glow-accent);
 }
 .auth-submit:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(99, 102, 241, 0.4); }
 .auth-submit:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
@@ -65,7 +67,7 @@
 .auth-error {
   background: rgba(239, 68, 68, 0.08);
   border: 1px solid rgba(239, 68, 68, 0.25);
-  color: #dc2626;
+  color: var(--danger-strong);
   font-size: 12.5px;
   padding: 9px 12px;
   border-radius: 9px;
@@ -92,7 +94,7 @@
 }
 .account-card-header { padding: 18px 24px; border-bottom: 1px solid var(--border); }
 .account-card-header h2 { font-size: 15px; font-weight: 700; }
-.account-profile-header { background: var(--header-bg); color: #fff; padding: 28px 24px; display: flex; align-items: center; gap: 16px; }
+.account-profile-header { background: var(--accent-grad); color: #fff; padding: 28px 24px; display: flex; align-items: center; gap: 16px; }
 .account-avatar {
   width: 52px; height: 52px; border-radius: 14px;
   background: rgba(255, 255, 255, 0.2);
@@ -107,7 +109,7 @@
   padding: 10px 18px; border-radius: 10px; cursor: pointer; transition: all 0.2s;
   align-self: flex-start;
 }
-.btn-primary { background: linear-gradient(135deg, #6366f1, #818cf8); color: #fff; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3); }
+.btn-primary { background: var(--accent-grad); color: #fff; box-shadow: var(--glow-accent); }
 .btn-primary:hover:not(:disabled) { transform: translateY(-1px); }
 .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 .btn-danger { background: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.3); }
@@ -115,18 +117,18 @@
 .btn-ghost { background: var(--bg); color: var(--text-secondary); }
 
 .account-msg { font-size: 12.5px; padding: 9px 12px; border-radius: 9px; }
-.account-msg.error { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); color: #dc2626; }
+.account-msg.error { background: var(--danger-light); border: 1px solid rgba(239, 68, 68, 0.25); color: var(--danger-strong); }
 .account-msg.success { background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); color: #059669; }
 
 .danger-body { padding: 20px 24px 24px; display: flex; flex-direction: column; gap: 12px; }
 .danger-body p { font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }
 
 .modal-overlay {
-  position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45);
+  position: fixed; inset: 0; background: var(--overlay);
   display: flex; align-items: center; justify-content: center; z-index: 50;
 }
 .modal {
-  background: var(--surface); border-radius: 16px; padding: 22px; width: 90%; max-width: 360px;
+  background: var(--surface-solid); border-radius: 16px; padding: 22px; width: 90%; max-width: 360px;
   display: flex; flex-direction: column; gap: 12px;
   box-shadow: 0 20px 50px rgba(30, 41, 59, 0.1);
 }

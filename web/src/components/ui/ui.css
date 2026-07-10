@@ -24,7 +24,9 @@
 
 .ui-card {
   background: var(--surface);
-  border: 1px solid var(--border);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
   padding: 18px 20px;
@@ -74,11 +76,11 @@
 .ui-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
 .ui-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .ui-btn.primary {
-  background: linear-gradient(135deg, var(--indigo-500), var(--indigo-400));
+  background: var(--accent-grad);
   border-color: transparent; color: #fff;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
+  box-shadow: var(--glow-accent);
 }
-.ui-btn.primary:hover:not(:disabled) { color: #fff; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35); }
+.ui-btn.primary:hover:not(:disabled) { color: #fff; filter: brightness(1.08); }
 .ui-btn svg { width: 15px; height: 15px; }
 
 .ui-spinner {
