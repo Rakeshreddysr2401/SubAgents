@@ -63,3 +63,69 @@ describe("InterruptCard", () => {
     expect(screen.getByText("Reject")).toBeDisabled();
   });
 });
+
+describe("ChoiceCard (ask_user_choice)", () => {
+  const askAddress: ActionRequest = {
+    name: "ask_user_choice",
+    args: {
+      question: "Which delivery address should I use?",
+      options: ["Home — 12 MG Road", "Office — Tower B"],
+    },
+  };
+
+  it("renders the question with tappable options; tapping responds", () => {
+    const onResolve = vi.fn();
+    render(<InterruptCard actionRequests={[askAddress]} onResolve={onResolve} resolving={false} />);
+    expect(screen.getByText("Your input needed")).toBeInTheDocument();
+    expect(screen.getByText("Which delivery address should I use?")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Office — Tower B"));
+    expect(onResolve).toHaveBeenCalledWith([{ type: "respond", message: "Office — Tower B" }]);
+  });
+
+  it("free-text answer responds with the typed value", () => {
+    const onResolve = vi.fn();
+    render(<InterruptCard actionRequests={[askAddress]} onResolve={onResolve} resolving={false} />);
+    fireEvent.change(screen.getByPlaceholderText("Something else…"), {
+      target: { value: "Mom's place, Jubilee Hills" },
+    });
+    fireEvent.click(screen.getByLabelText("Send answer"));
+    expect(onResolve).toHaveBeenCalledWith([
+      { type: "respond", message: "Mom's place, Jubilee Hills" },
+    ]);
+  });
+
+  it("dismiss rejects", () => {
+    const onResolve = vi.fn();
+    render(<InterruptCard actionRequests={[askAddress]} onResolve={onResolve} resolving={false} />);
+    fireEvent.click(screen.getByText("Dismiss"));
+    expect(onResolve).toHaveBeenCalledWith([{ type: "reject" }]);
+  });
+});
+
+describe("OrderConfirmCard (confirm_order)", () => {
+  const order: ActionRequest = {
+    name: "confirm_order",
+    args: {
+      items: [{ name: "Masala Dosa", quantity: 2 }, { name: "Filter Coffee", quantity: 1 }],
+      final_amount: 342,
+      address: "Home — 12 MG Road",
+      cart_id: "c1",
+    },
+  };
+
+  it("shows items, address and the final amount prominently", () => {
+    render(<InterruptCard actionRequests={[order]} onResolve={vi.fn()} resolving={false} />);
+    expect(screen.getByText("Place this order?")).toBeInTheDocument();
+    expect(screen.getByText("Masala Dosa")).toBeInTheDocument();
+    expect(screen.getByText("₹342")).toBeInTheDocument();
+    expect(screen.getByText(/Deliver to: Home — 12 MG Road/)).toBeInTheDocument();
+    expect(screen.getByText("Approval needed")).toBeInTheDocument(); // money = alarm header
+  });
+
+  it("approve resolves the order", () => {
+    const onResolve = vi.fn();
+    render(<InterruptCard actionRequests={[order]} onResolve={onResolve} resolving={false} />);
+    fireEvent.click(screen.getByText("Approve"));
+    expect(onResolve).toHaveBeenCalledWith([{ type: "approve" }]);
+  });
+});

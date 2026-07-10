@@ -6,6 +6,7 @@ from src.tools.location_tools import get_current_location
 from src.tools.music_tools import list_music_stations, play_music, stop_music
 from src.tools.news_tools import get_latest_news
 from src.tools.order_tools import set_active_order
+from src.tools.ui_tools import ask_user_choice
 from src.tools.shopping_tools import (
     add_shopping_item,
     list_shopping_items,
@@ -43,17 +44,19 @@ CONVERSATION_TOOLS = [
     *MUSIC_TOOLS,
     *GUARDIAN_TOOLS,
     *_WEB_TOOLS,
+    ask_user_choice,
 ]
 
 # Non-MCP tools the ordering agents always carry. apply_mcp_tools() COMPOSES
 # these with the MCP tools (it must never plain-overwrite the lists, or
 # everything registered at import time would be silently wiped at startup).
-_SWIGGY_BASE_TOOLS = [*SHOPPING_TOOLS, get_current_location, set_active_order]
-_INSTAMART_BASE_TOOLS = [*SHOPPING_TOOLS, get_current_location, set_active_order]
+_SWIGGY_BASE_TOOLS = [*SHOPPING_TOOLS, get_current_location, set_active_order, ask_user_choice]
+_INSTAMART_BASE_TOOLS = [*SHOPPING_TOOLS, get_current_location, set_active_order, ask_user_choice]
+_DINEOUT_BASE_TOOLS = [ask_user_choice]
 
 SWIGGY_TOOLS = [*_SWIGGY_BASE_TOOLS]
 INSTAMART_TOOLS = [*_INSTAMART_BASE_TOOLS]
-DINEOUT_TOOLS = []
+DINEOUT_TOOLS = [*_DINEOUT_BASE_TOOLS]
 
 # The food and instamart MCP servers SHARE several tool names (get_addresses,
 # confirm_order, get_payment_options, …), so the tracker can't carry both full
@@ -65,7 +68,7 @@ _TRACKING_TOOL_NAMES = {
     "get_orders", "track_order", "get_delivery_status",    # instamart
 }
 
-TRACKER_TOOLS = [set_active_order]
+TRACKER_TOOLS = [set_active_order, ask_user_choice]
 
 
 def apply_mcp_tools(
@@ -80,9 +83,10 @@ def apply_mcp_tools(
     dineout_tools = dineout_tools or []
     SWIGGY_TOOLS[:] = [*_SWIGGY_BASE_TOOLS, *food_tools]
     INSTAMART_TOOLS[:] = [*_INSTAMART_BASE_TOOLS, *instamart_tools]
-    DINEOUT_TOOLS[:] = list(dineout_tools)
+    DINEOUT_TOOLS[:] = [*_DINEOUT_BASE_TOOLS, *dineout_tools]
     TRACKER_TOOLS[:] = [
         set_active_order,
+        ask_user_choice,
         *(
             t
             for t in [*food_tools, *instamart_tools]

@@ -141,3 +141,36 @@ async def test_ungated_tool_does_not_interrupt(make_graph):
     assert "__interrupt__" not in result
     assert result["messages"][-1].content == "It's currently daytime."
     assert result.get("active_agent", CONVERSATION) == CONVERSATION
+
+
+async def test_ask_user_choice_interrupts_and_respond_returns_selection(make_graph):
+    """ask_user_choice rides the same interrupt rails: the {question, options}
+    args reach the browser typed, and the "respond" decision comes back to
+    the model as the tool's result (the user's selection)."""
+    graph, fake, subprocess_run = make_graph(
+        [
+            _tool_call("ask_user_choice", {
+                "question": "Which delivery address should I use?",
+                "options": ["Home — 12 MG Road", "Office — Tower B"],
+            }),
+            AIMessage(content="Delivering to the office."),
+        ]
+    )
+    cfg = {"configurable": {"thread_id": "hitl-choice"}}
+    result = await graph.ainvoke(_inputs("order a dosa to my usual place"), cfg)
+
+    interrupt = result["__interrupt__"][0]
+    request = interrupt.value["action_requests"][0]
+    assert request["name"] == "ask_user_choice"
+    assert request["args"]["options"] == ["Home — 12 MG Road", "Office — Tower B"]
+    # The gate restricts decisions to respond/reject — no blind "approve".
+    review = interrupt.value["review_configs"][0]
+    assert set(review["allowed_decisions"]) == {"respond", "reject"}
+
+    result = await graph.ainvoke(
+        Command(resume={"decisions": [{"type": "respond", "message": "Office — Tower B"}]}),
+        cfg,
+    )
+    tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
+    assert tool_messages and "Office — Tower B" in tool_messages[-1].content
+    assert result["messages"][-1].content == "Delivering to the office."

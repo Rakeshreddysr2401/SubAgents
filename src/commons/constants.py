@@ -26,7 +26,11 @@ AGENT_DESCRIPTIONS = {
 # at the tool boundary, not in prompts. src/app.py logs every loaded MCP
 # tool's name at startup so further cart-mutation names can be enumerated and
 # added once the MCP servers are reachable.
-GATED_TOOL_NAMES: dict[str, bool] = {
+GATED_TOOL_NAMES: dict = {
     "open_mac_app": True,
     "confirm_order": True,
+    # Not an approval — a structured question. The interrupt ships
+    # {question, options} to the browser, the ChoiceCard renders buttons,
+    # and the user's pick returns as the tool result via "respond".
+    "ask_user_choice": {"allowed_decisions": ["respond", "reject"]},
 }

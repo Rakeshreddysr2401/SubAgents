@@ -226,8 +226,8 @@ def test_apply_mcp_tools_tracker_whitelist_no_collisions():
 
         tracker_names = [t.name for t in tools_pkg.TRACKER_TOOLS]
         assert sorted(tracker_names) == sorted(
-            ["set_active_order", "get_food_orders", "track_food_order",
-             "get_orders", "track_order"]
+            ["set_active_order", "ask_user_choice", "get_food_orders",
+             "track_food_order", "get_orders", "track_order"]
         )
         assert len(tracker_names) == len(set(tracker_names))  # no duplicates
 
@@ -240,7 +240,9 @@ def test_apply_mcp_tools_tracker_whitelist_no_collisions():
         assert "list_shopping_items" in instamart_names
         assert "search_products" in instamart_names
 
-        assert [t.name for t in tools_pkg.DINEOUT_TOOLS] == ["search_dineout", "book_table"]
+        assert [t.name for t in tools_pkg.DINEOUT_TOOLS] == [
+            "ask_user_choice", "search_dineout", "book_table"  # base survives
+        ]
     finally:
         (tools_pkg.SWIGGY_TOOLS[:], tools_pkg.INSTAMART_TOOLS[:],
          tools_pkg.DINEOUT_TOOLS[:], tools_pkg.TRACKER_TOOLS[:]) = before
