@@ -60,6 +60,11 @@ export function EventsBridge() {
             stopMusic();
           }
           break;
+        case "mcp_auth_expired": {
+          const message = String(parsed.message ?? "An integration's login expired.");
+          pushToast({ kind: "info", title: "Login expired", body: message, persistent: true });
+          break;
+        }
         case "guardian_alert": {
           const message = String(parsed.message ?? "Something needs your attention.");
           pushToast({ kind: "guardian", title: "Guardian alert", body: message, persistent: true });

@@ -251,6 +251,14 @@ def create_app() -> FastAPI:
     async def account_page():
         return _serve_spa()
 
+    @app.get("/settings", response_class=HTMLResponse)
+    async def settings_page():
+        return _serve_spa()
+
+    @app.get("/setup", response_class=HTMLResponse)
+    async def setup_page():
+        return _serve_spa()
+
     app.include_router(system.router)
     app.include_router(auth.router)
     app.include_router(chat.router)

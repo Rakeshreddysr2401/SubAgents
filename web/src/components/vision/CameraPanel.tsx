@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { authFetch } from "../../api/client";
 import { useEventsStore } from "../../state/eventsStore";
+import "./CameraPanel.css";
 
 interface CameraPanelProps {
   threadId: string;

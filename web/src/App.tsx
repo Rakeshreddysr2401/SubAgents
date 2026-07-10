@@ -4,6 +4,8 @@ import { RequireAuth } from "./components/RequireAuth";
 import { ChatView } from "./components/chat/ChatView";
 import { LoginPage } from "./components/auth/LoginPage";
 import { AccountPage } from "./components/auth/AccountPage";
+import { SettingsPage } from "./components/settings/SettingsPage";
+import { SetupWizard } from "./components/setup/SetupWizard";
 
 function App() {
   return (
@@ -24,6 +26,22 @@ function App() {
             element={
               <RequireAuth>
                 <AccountPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <RequireAuth>
+                <SettingsPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/setup"
+            element={
+              <RequireAuth>
+                <SetupWizard />
               </RequireAuth>
             }
           />

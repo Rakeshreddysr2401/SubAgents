@@ -73,5 +73,30 @@ export type ChatEvent =
   | { tool_call: ToolCallEvent }
   | { tool_result: ToolResultEvent }
   | { interrupt: InterruptEvent }
+  | { progress: string }
   | { done: true; thread_id: string; active_agent?: string }
   | { error: string };
+
+/** One rewind target per completed turn (GET /threads/{id}/checkpoints). */
+export interface ThreadCheckpoint {
+  checkpoint_id: string;
+  num_messages: number;
+  last_role: string | null;
+  last_preview: string | null;
+  created_at: string | null;
+}
+
+/** System preflight (GET /system/preflight) — drives the setup wizard. */
+export interface PreflightCheck {
+  ok: boolean;
+  detail?: string;
+  provider?: string;
+  model?: string;
+  configured?: boolean;
+  days_left?: number | null;
+}
+
+export interface PreflightResponse {
+  ready: boolean;
+  checks: Record<string, PreflightCheck>;
+}

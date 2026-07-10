@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { authFetch } from "../../api/client";
 import { resumeChat, streamChat } from "../../api/stream";
-import type { ChatEvent, ResumeDecision, ThreadMessagesResponse, Todo } from "../../api/types";
+import type {
+  ChatEvent,
+  PreflightResponse,
+  ResumeDecision,
+  ThreadCheckpoint,
+  ThreadMessagesResponse,
+  Todo,
+} from "../../api/types";
 import { useAuth } from "../../state/AuthContext";
 import { useChatStream } from "../../state/chatStream";
 import { useThreads } from "../../hooks/useThreads";
@@ -19,9 +27,10 @@ import { ToastStack } from "../notifications/ToastStack";
 import { RemindersPanel } from "../panels/RemindersPanel";
 import { ShoppingPanel } from "../panels/ShoppingPanel";
 import { MusicPanel } from "../panels/MusicPanel";
+import { ThemeToggle } from "../ThemeToggle";
 import { speak } from "../../lib/tts";
 import { getLocation } from "../../lib/geolocation";
-import "./ChatView.css";
+import "./ChatLayout.css";
 
 const HINTS = ["What can you do?", "Help me with a task", "Tell me about yourself"];
 
@@ -29,8 +38,17 @@ function newId(): string {
   return crypto.randomUUID();
 }
 
+/** Time travel state: the checkpoint to fork from + the text being edited. */
+interface RewindState {
+  checkpointId: string | null; // null = restart the thread from scratch
+  draft: string;
+  /** Index into `messages` of the user message being edited. */
+  messageIndex: number;
+}
+
 export function ChatView() {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const { threads, loadThreads, renameThread, deleteThread } = useThreads();
   const {
     activeAgent,
@@ -51,12 +69,32 @@ export function ChatView() {
   const [alwaysSpeak, setAlwaysSpeak] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [rewind, setRewind] = useState<RewindState | null>(null);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadThreads();
   }, [loadThreads]);
+
+  // First-run gate: if the system isn't ready (LLM unreachable, models
+  // missing, infra down), land on the setup wizard instead of a broken chat.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authFetch("/system/preflight");
+        if (!res.ok) return;
+        const data: PreflightResponse = await res.json();
+        if (!cancelled && !data.ready) navigate("/setup");
+      } catch {
+        // Preflight itself failing shouldn't lock the user out of chat.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
 
   useEffect(() => {
     if (!error) return;
@@ -77,6 +115,7 @@ export function ChatView() {
     setThreadId(newId());
     setMessages([]);
     setTodos([]);
+    setRewind(null);
   }, [setTodos]);
 
   const selectThread = useCallback(async (id: string) => {
@@ -94,6 +133,7 @@ export function ChatView() {
         })),
       );
       setTodos([]);
+      setRewind(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -124,6 +164,13 @@ export function ChatView() {
       }
       if ("agent" in event) {
         setActiveAgent(event.agent);
+        continue;
+      }
+      if ("progress" in event) {
+        // Long-tool progress: shown in the thinking bubble while it lasts.
+        setMessages((prev) =>
+          prev.map((m) => (m.id === botId ? { ...m, progressText: event.progress } : m)),
+        );
         continue;
       }
       if ("tool_call" in event) {
@@ -161,6 +208,23 @@ export function ChatView() {
   const sendMessage = useCallback(async (query: string) => {
     setSending(true);
     resetTurn();
+
+    // Time travel: forking truncates the visible transcript to the shared
+    // prefix before appending the edited message. Editing the FIRST message
+    // has no earlier checkpoint — it becomes a fresh thread instead.
+    const activeRewind = rewind;
+    setRewind(null);
+    let tid = threadId;
+    if (activeRewind) {
+      if (activeRewind.checkpointId === null) {
+        tid = newId();
+        setThreadId(tid);
+        setMessages([]);
+      } else {
+        setMessages((prev) => prev.slice(0, activeRewind.messageIndex));
+      }
+    }
+
     setMessages((prev) => [...prev, { id: newId(), role: "user", content: query }]);
     const botId = newId();
     setMessages((prev) => [...prev, { id: botId, role: "bot", content: "", thinking: true }]);
@@ -168,7 +232,11 @@ export function ChatView() {
     try {
       // Location is best-effort: null on deny/timeout, cached 5 min.
       const location = await getLocation();
-      const finished = await consumeIntoMessage(streamChat(threadId, query, alwaysSpeak, location), botId, "");
+      const finished = await consumeIntoMessage(
+        streamChat(tid, query, alwaysSpeak, location, activeRewind?.checkpointId ?? null),
+        botId,
+        "",
+      );
       if (finished) {
         loadThreads();
         setSending(false);
@@ -181,7 +249,34 @@ export function ChatView() {
       setError(message);
       setSending(false);
     }
-  }, [threadId, alwaysSpeak, loadThreads, resetTurn, consumeIntoMessage]);
+  }, [threadId, alwaysSpeak, loadThreads, resetTurn, consumeIntoMessage, rewind]);
+
+  /** "Edit & resend from here": find the turn-boundary checkpoint BEFORE the
+   * k-th user message and stage a fork. Boundaries come back newest-first,
+   * one per completed turn — reversed, boundary[k-2] precedes user turn k. */
+  const startRewind = useCallback(async (messageIndex: number) => {
+    const target = messages[messageIndex];
+    if (!target || target.role !== "user" || sending) return;
+    const userTurnNumber = messages
+      .slice(0, messageIndex + 1)
+      .filter((m) => m.role === "user").length;
+    try {
+      if (userTurnNumber === 1) {
+        // Nothing before the first message — sending will restart the thread.
+        setRewind({ checkpointId: null, draft: target.content, messageIndex });
+        return;
+      }
+      const res = await authFetch(`/threads/${threadId}/checkpoints`);
+      if (!res.ok) throw new Error("Could not load this conversation's history.");
+      const data: { checkpoints: ThreadCheckpoint[] } = await res.json();
+      const boundaries = [...data.checkpoints].reverse(); // oldest first
+      const before = boundaries[userTurnNumber - 2];
+      if (!before) throw new Error("No rewind point found for that message.");
+      setRewind({ checkpointId: before.checkpoint_id, draft: target.content, messageIndex });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [messages, sending, threadId]);
 
   const resumeTurn = useCallback(async (decisions: ResumeDecision[]) => {
     if (!pendingInterrupt) return;
@@ -237,7 +332,7 @@ export function ChatView() {
           <AgentBadge agent={activeAgent} />
           <WakeWordIndicator />
           <VoiceWaveform />
-          <span className="header-pill" title={threadId}>{threadId.slice(0, 8)}...</span>
+          <ThemeToggle />
           <div className="user-menu">
             <button className="user-avatar-btn" onClick={() => setMenuOpen((v) => !v)} type="button">
               <span className="avatar-circle">{user?.email?.[0]?.toUpperCase() ?? "?"}</span>
@@ -245,9 +340,17 @@ export function ChatView() {
             </button>
             <div className={`user-dropdown${menuOpen ? " open" : ""}`}>
               <div className="user-dropdown-email">{user?.email}</div>
-              <div className="user-dropdown-item" onClick={() => (window.location.href = "/account")}>
+              <div className="user-dropdown-item" onClick={() => navigate("/settings")}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
-                Account settings
+                Settings
+              </div>
+              <div className="user-dropdown-item" onClick={() => navigate("/setup")}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+                System check
+              </div>
+              <div className="user-dropdown-item" onClick={() => navigate("/account")}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+                Account
               </div>
               <div className="user-dropdown-item danger" onClick={logout}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
@@ -302,7 +405,13 @@ export function ChatView() {
                 </div>
               </div>
             ) : (
-              messages.map((m) => <MessageBubble key={m.id} {...m} />)
+              messages.map((m, i) => (
+                <MessageBubble
+                  key={m.id}
+                  {...m}
+                  onRewind={m.role === "user" && !sending ? () => startRewind(i) : undefined}
+                />
+              ))
             )}
             {pendingInterrupt && (
               <InterruptCard
@@ -317,6 +426,8 @@ export function ChatView() {
             sending={sending}
             alwaysSpeak={alwaysSpeak}
             onToggleAlwaysSpeak={() => setAlwaysSpeak((v) => !v)}
+            rewindDraft={rewind?.draft ?? null}
+            onCancelRewind={() => setRewind(null)}
           />
         </div>
       </div>

@@ -46,6 +46,7 @@ export function streamChat(
   query: string,
   alwaysSpeak: boolean,
   location: { lat: number; lon: number; accuracy_m: number | null } | null = null,
+  checkpointId: string | null = null,
 ): AsyncGenerator<ChatEvent> {
   const url = new URL("/chat", window.location.origin);
   if (threadId) url.searchParams.set("thread_id", threadId);
@@ -53,7 +54,13 @@ export function streamChat(
   const responsePromise = authFetch(url.toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, always_speak: alwaysSpeak, location }),
+    body: JSON.stringify({
+      query,
+      always_speak: alwaysSpeak,
+      location,
+      // Time travel: fork the thread from this checkpoint instead of the tip.
+      checkpoint_id: checkpointId,
+    }),
   });
   return consumeStreamed(responsePromise);
 }

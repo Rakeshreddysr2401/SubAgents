@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useVoiceStore } from "../../state/voiceStore";
+import "./Composer.css";
 
 interface SpeechRecognitionResultEvent extends Event {
   results: { [index: number]: { [index: number]: { transcript: string } } };
@@ -21,14 +22,27 @@ interface ComposerProps {
   sending: boolean;
   alwaysSpeak: boolean;
   onToggleAlwaysSpeak: () => void;
+  /** Time travel: pre-filled text of the message being edited & resent. */
+  rewindDraft?: string | null;
+  onCancelRewind?: () => void;
 }
 
 const SpeechRecognitionCtor: (new () => SpeechRecognitionLike) | undefined =
   (window as unknown as { SpeechRecognition?: new () => SpeechRecognitionLike }).SpeechRecognition ??
   (window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognitionLike }).webkitSpeechRecognition;
 
-export function Composer({ onSend, sending, alwaysSpeak, onToggleAlwaysSpeak }: ComposerProps) {
+export function Composer({
+  onSend, sending, alwaysSpeak, onToggleAlwaysSpeak, rewindDraft, onCancelRewind,
+}: ComposerProps) {
   const [value, setValue] = useState("");
+
+  useEffect(() => {
+    if (rewindDraft != null) {
+      setValue(rewindDraft);
+      textareaRef.current?.focus();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rewindDraft]);
   const listening = useVoiceStore((s) => s.listening);
   const setListening = useVoiceStore((s) => s.setListening);
   const wakeSignal = useVoiceStore((s) => s.wakeSignal);
@@ -78,6 +92,12 @@ export function Composer({ onSend, sending, alwaysSpeak, onToggleAlwaysSpeak }: 
 
   return (
     <div className="input-area">
+      {rewindDraft != null && (
+        <div className="rewind-banner">
+          <span>Editing an earlier message — sending will rewind the conversation to that point.</span>
+          <button onClick={onCancelRewind} type="button">Cancel</button>
+        </div>
+      )}
       <div className="input-wrapper">
         {SpeechRecognitionCtor && (
           <button

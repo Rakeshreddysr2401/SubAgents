@@ -1,0 +1,125 @@
+/* ============================================================
+   Design tokens — the single source of truth for color, space,
+   type, radius, shadow and motion.
+
+   Layer 1: primitives (raw scales, never used directly in
+            component CSS).
+   Layer 2: semantic aliases (what components consume). The
+            legacy variable names (--bg, --surface, --primary,
+            --text…) ARE the semantic layer, so every component
+            stylesheet is automatically theme-aware.
+
+   Dark mode: `[data-theme="dark"]` on <html> overrides ONLY the
+   semantic layer. themeStore.ts stamps the attribute (persisted,
+   defaults to prefers-color-scheme).
+   ============================================================ */
+
+:root {
+  /* --- primitives: brand + neutrals --- */
+  --indigo-400: #818cf8;
+  --indigo-500: #6366f1;
+  --indigo-600: #4f46e5;
+  --violet-400: #a78bfa;
+  --violet-500: #8b5cf6;
+  --slate-25: #fbfbfe;
+  --slate-50: #f7f9fc;
+  --slate-100: #f0f4f8;
+  --slate-200: #e3e8ef;
+  --slate-300: #cbd5e1;
+  --slate-400: #94a3b8;
+  --slate-500: #64748b;
+  --slate-700: #334155;
+  --slate-800: #1e293b;
+  --slate-900: #0f172a;
+  --slate-950: #0a0f1c;
+  --green-500: #10b981;
+  --green-600: #059669;
+  --red-500: #ef4444;
+  --red-600: #dc2626;
+  --amber-500: #f59e0b;
+
+  /* --- primitives: type / space / radius / motion --- */
+  --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --ease: cubic-bezier(0.25, 0.7, 0.3, 1);
+  --dur-fast: 0.15s;
+  --dur-med: 0.25s;
+
+  /* --- semantic: light theme (default) --- */
+  color-scheme: light;
+  --bg: var(--slate-100);
+  --surface: #ffffff;
+  --surface-alt: var(--slate-50);
+  --sidebar-bg: var(--slate-25);
+  --border: var(--slate-200);
+  --border-light: #eef1f6;
+  --primary: var(--indigo-500);
+  --primary-hover: var(--indigo-600);
+  --primary-light: rgba(99, 102, 241, 0.07);
+  --primary-glow: rgba(99, 102, 241, 0.15);
+  --text: var(--slate-800);
+  --text-secondary: var(--slate-500);
+  --text-muted: var(--slate-400);
+  --user-bubble: linear-gradient(135deg, var(--indigo-500), var(--indigo-400));
+  --bot-bubble: #ffffff;
+  --code-bg: #f8fafc;
+  --code-border: #e2e8f0;
+  --code-block-bg: var(--slate-800);
+  --code-block-text: #e2e8f0;
+  --inline-code-text: #7c3aed;
+  --green: var(--green-500);
+  --green-light: rgba(16, 185, 129, 0.1);
+  --header-bg: linear-gradient(135deg, var(--indigo-500) 0%, var(--violet-500) 100%);
+  --danger: var(--red-500);
+  --danger-strong: var(--red-600);
+  --danger-light: rgba(239, 68, 68, 0.08);
+  --accent: var(--amber-500);
+  --thinking-bubble: linear-gradient(120deg, #e0e7ff, #ede9fe, #fce7f3, #dcfce7, #cffafe, #e0e7ff);
+  --overlay: rgba(15, 23, 42, 0.45);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: var(--slate-950);
+  --surface: #131a2b;
+  --surface-alt: #0e1524;
+  --sidebar-bg: #0c1220;
+  --border: #263043;
+  --border-light: #1c2537;
+  --primary: var(--indigo-400);
+  --primary-hover: var(--indigo-500);
+  --primary-light: rgba(129, 140, 248, 0.12);
+  --primary-glow: rgba(129, 140, 248, 0.22);
+  --text: #e6ebf4;
+  --text-secondary: #9aa8bf;
+  --text-muted: #64748b;
+  --user-bubble: linear-gradient(135deg, var(--indigo-600), var(--indigo-500));
+  --bot-bubble: #131a2b;
+  --code-bg: #0e1524;
+  --code-border: #263043;
+  --code-block-bg: #0a0f1c;
+  --code-block-text: #cbd5e1;
+  --inline-code-text: var(--violet-400);
+  --green-light: rgba(16, 185, 129, 0.16);
+  --header-bg: linear-gradient(135deg, #3730a3 0%, #5b21b6 100%);
+  --danger-strong: #f87171;
+  --danger-light: rgba(239, 68, 68, 0.14);
+  --thinking-bubble: linear-gradient(120deg, #1e2a4a, #2a2350, #3b1e42, #1c3a34, #1a3345, #1e2a4a);
+  --overlay: rgba(2, 6, 16, 0.6);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.55);
+}

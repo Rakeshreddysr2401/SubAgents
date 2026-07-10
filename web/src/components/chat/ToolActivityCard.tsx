@@ -1,4 +1,5 @@
 import type { ToolActivityItem } from "../../state/chatStream";
+import "./ActivityCards.css";
 
 function friendlyToolName(name: string): string {
   return name.replace(/_/g, " ");

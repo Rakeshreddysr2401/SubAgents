@@ -1,0 +1,38 @@
+/* Reset + global typography. Tokens live in tokens.css. */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  transition: background var(--dur-med) var(--ease), color var(--dur-med) var(--ease);
+}
+
+button {
+  font-family: inherit;
+}
+
+input, textarea, select {
+  font-family: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--primary-glow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

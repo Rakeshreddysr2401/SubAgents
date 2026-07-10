@@ -1,4 +1,5 @@
 import type { Todo } from "../../api/types";
+import "./ActivityCards.css";
 
 function StatusIcon({ status }: { status: Todo["status"] }) {
   if (status === "completed") {

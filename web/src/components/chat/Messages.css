@@ -1,0 +1,108 @@
+/* Message bubbles + markdown rendering + thinking state (MessageBubble). */
+
+.message { display: flex; gap: 10px; max-width: 88%; animation: fadeIn var(--dur-med) var(--ease); position: relative; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.message.user { align-self: flex-end; flex-direction: row-reverse; }
+.message.bot { align-self: flex-start; }
+.avatar {
+  width: 32px; height: 32px;
+  border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+  flex-shrink: 0;
+}
+.message.user .avatar { background: linear-gradient(135deg, var(--indigo-500), var(--indigo-400)); color: #fff; }
+.message.bot .avatar { background: linear-gradient(135deg, var(--violet-500), var(--violet-400)); color: #fff; }
+
+.bubble { padding: 11px 15px; border-radius: var(--radius-md); font-size: 13.5px; line-height: 1.65; word-break: break-word; }
+.message.user .bubble {
+  background: var(--user-bubble); color: #fff; border-bottom-right-radius: 4px;
+  white-space: pre-wrap; box-shadow: 0 2px 8px rgba(99, 102, 241, 0.2);
+}
+.message.bot .bubble { background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 4px; box-shadow: var(--shadow-sm); }
+
+/* Rewind ("edit & resend from here") — appears on hover over user messages */
+.msg-rewind {
+  position: absolute;
+  top: 50%; left: -30px;
+  transform: translateY(-50%);
+  width: 24px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: all var(--dur-fast) var(--ease);
+}
+.message.user:hover .msg-rewind { opacity: 1; }
+.msg-rewind:hover { color: var(--primary); border-color: var(--primary); }
+.msg-rewind svg { width: 12px; height: 12px; }
+
+/* Markdown */
+.bubble .md-content { font-size: 13.5px; line-height: 1.65; color: var(--text); }
+.bubble .md-content p { margin: 0 0 8px 0; }
+.bubble .md-content p:last-child { margin-bottom: 0; }
+.bubble .md-content strong { font-weight: 600; }
+.bubble .md-content h1, .bubble .md-content h2, .bubble .md-content h3 { font-weight: 700; margin: 12px 0 6px 0; color: var(--text); }
+.bubble .md-content h1:first-child, .bubble .md-content h2:first-child, .bubble .md-content h3:first-child { margin-top: 0; }
+.bubble .md-content h1 { font-size: 16px; }
+.bubble .md-content h2 { font-size: 15px; }
+.bubble .md-content h3 { font-size: 14px; }
+.bubble .md-content ul, .bubble .md-content ol { margin: 6px 0; padding-left: 18px; }
+.bubble .md-content li { margin-bottom: 3px; }
+.bubble .md-content li::marker { color: var(--primary); }
+.bubble .md-content code {
+  background: var(--code-bg); border: 1px solid var(--code-border);
+  padding: 2px 6px; border-radius: 5px;
+  font-family: var(--font-mono); font-size: 12px; color: var(--inline-code-text);
+}
+.bubble .md-content pre {
+  background: var(--code-block-bg); color: var(--code-block-text);
+  padding: 14px 16px; border-radius: var(--radius-sm);
+  overflow-x: auto; margin: 8px 0; font-size: 12px;
+  line-height: 1.5; position: relative;
+}
+.bubble .md-content pre code { background: none; border: none; padding: 0; color: inherit; font-size: inherit; }
+.code-block-wrapper { position: relative; }
+.copy-btn {
+  position: absolute; top: 8px; right: 8px;
+  background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--slate-400); font-size: 10px; padding: 3px 9px;
+  border-radius: 5px; cursor: pointer; transition: all var(--dur-fast);
+}
+.copy-btn:hover { background: rgba(255, 255, 255, 0.2); color: var(--code-block-text); }
+.bubble .md-content blockquote {
+  border-left: 3px solid var(--primary); padding: 6px 14px; margin: 8px 0;
+  background: var(--primary-light); border-radius: 0 8px 8px 0;
+}
+.bubble .md-content blockquote p { margin: 0; }
+.bubble .md-content table { border-collapse: collapse; margin: 8px 0; width: 100%; font-size: 12px; }
+.bubble .md-content th, .bubble .md-content td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+.bubble .md-content th { background: var(--code-bg); font-weight: 600; }
+.bubble .md-content a { color: var(--primary); text-decoration: none; font-weight: 500; }
+.bubble .md-content a:hover { text-decoration: underline; }
+.bubble .md-content hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+
+/* Thinking */
+.message.bot .bubble.thinking-active {
+  width: fit-content; max-width: 100%;
+  padding: 7px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--primary-light);
+  background: var(--thinking-bubble);
+  background-size: 280% 100%;
+  animation: thinking-flow 5s linear infinite;
+  box-shadow: var(--shadow-sm);
+}
+@keyframes thinking-flow { 0% { background-position: 0% 50%; } 100% { background-position: 280% 50%; } }
+.thinking-label { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.2px; }
+.thinking-label .tdots { display: inline-flex; gap: 3px; }
+.thinking-label .tdots span { width: 5px; height: 5px; border-radius: 50%; background: var(--primary); animation: bounce 1.4s infinite ease-in-out; }
+.thinking-label .tdots span:nth-child(2) { animation-delay: 0.16s; }
+.thinking-label .tdots span:nth-child(3) { animation-delay: 0.32s; }
+@keyframes bounce { 0%, 80%, 100% { transform: scale(0.7); opacity: 0.3; } 40% { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .message.bot .bubble.thinking-active, .thinking-label .tdots span { animation: none; }
+}

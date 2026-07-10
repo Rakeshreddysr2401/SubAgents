@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { ActionRequest, ResumeDecision } from "../../api/types";
+import "./ActivityCards.css";
 
 interface InterruptCardProps {
   actionRequests: ActionRequest[];

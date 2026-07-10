@@ -1,5 +1,25 @@
-/* Shared styling for the left-panel cards (reminders, shopping, music).
-   Builds on .tools-card / .tools-card-header from ChatView.css. */
+/* Shared styling for the left-panel cards (reminders, shopping, music). */
+
+/* Card shell (also used by the tools placeholder) */
+.tools-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.tools-card-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px;
+  font-size: 13px; font-weight: 600; color: var(--text);
+}
+.tools-card-header svg { width: 16px; height: 16px; color: var(--primary); }
+.tools-body { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.tools-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; opacity: 0.4; }
+.tools-empty svg { width: 28px; height: 28px; color: var(--text-muted); }
+.tools-empty span { font-size: 11px; color: var(--text-muted); font-weight: 500; }
 
 .panel-card {
   flex: 0 0 auto;
@@ -32,7 +52,7 @@
 }
 
 .panel-row:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--primary-light);
 }
 
 .panel-row.muted {
@@ -76,7 +96,7 @@
 
 .panel-row-action:hover {
   opacity: 1;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--primary-light);
 }
 
 .panel-subheader {
@@ -97,7 +117,7 @@
 }
 
 .panel-check input[type="checkbox"] {
-  accent-color: var(--primary, #5c8dff);
+  accent-color: var(--primary);
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -111,8 +131,8 @@
 .panel-add input {
   flex: 1;
   min-width: 0;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border, #2e3140);
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 8px;
   color: inherit;
   font-size: 12px;
@@ -121,12 +141,12 @@
 
 .panel-add input:focus {
   outline: none;
-  border-color: var(--primary, #5c8dff);
+  border-color: var(--primary);
 }
 
 .panel-add button {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--border, #2e3140);
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 8px;
   color: inherit;
   cursor: pointer;
@@ -149,8 +169,8 @@
 .music-select {
   flex: 1;
   min-width: 0;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border, #2e3140);
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 8px;
   color: inherit;
   font-size: 12px;
@@ -158,8 +178,8 @@
 }
 
 .music-btn {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--border, #2e3140);
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 8px;
   color: inherit;
   cursor: pointer;
@@ -169,8 +189,8 @@
 }
 
 .music-btn.playing {
-  border-color: var(--primary, #5c8dff);
-  color: var(--primary, #5c8dff);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .music-now-playing {
@@ -194,7 +214,7 @@
 
 .music-eq span {
   width: 3px;
-  background: var(--primary, #5c8dff);
+  background: var(--primary);
   animation: music-eq-bounce 0.9s ease-in-out infinite;
 }
 
