@@ -38,20 +38,23 @@ cp .env.example .env
 
 ### Embedding provider
 
-- **OpenAI (default)**: `EMBEDDING_PROVIDER=openai` (1536-dim, needs `OPENAI_API_KEY`).
-- **Fully local**: `EMBEDDING_PROVIDER=ollama` and pull the model:
+- **Fully local (default)**: `EMBEDDING_PROVIDER=ollama` — pull the model first:
   ```bash
   ollama pull nomic-embed-text     # 768-dim
   ```
+- **OpenAI**: `EMBEDDING_PROVIDER=openai` (1536-dim, needs `OPENAI_API_KEY`).
 
-> ⚠️ Switching embedding providers changes vector dimensions. You must drop and
-> re-create the Qdrant collections — see [memory-and-rag.md](memory-and-rag.md).
+Switching embedding providers is non-destructive: collections are
+dimension-suffixed (`documents_768` vs `documents_1536`), so the other
+dimension's data is orphaned rather than corrupted. Re-ingest documents after a
+switch and clean up orphans with `uv run python scripts/migrate_qdrant.py --list`.
 
 ### Memory extraction LLM
 
-Mem0 uses an LLM to extract durable facts. Local models are unreliable at this
-(they hallucinate facts). Keep `MEM0_LLM_PROVIDER=openai` (`gpt-4o-mini`) in
-production even when the chat model is local.
+Mem0 uses an LLM to extract durable facts. By default it follows the chat
+provider (`MEM0_LLM_PROVIDER=main`), so a zero-key local install works out of
+the box. Extraction quality is noticeably better on OpenAI — when you have a
+key, upgrade with `MEM0_LLM_PROVIDER=openai` (`gpt-4o-mini`).
 
 ## 4. Run the app
 

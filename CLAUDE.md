@@ -8,14 +8,18 @@ Technical reference for the SubAgents codebase. Read this before making changes.
 
 - **Runtime**: Python 3.11+, managed with `uv`; React 19 + TypeScript + Vite frontend in `web/`, managed with `npm`
 - **Framework**: LangGraph + `langgraph-swarm` (graph), LangChain agents, `deepagents`
-  (planner), FastAPI (standalone API), Ollama/llama.cpp/OpenAI (LLM)
+  (planner), FastAPI (standalone API); LLM providers: llama_cpp (any
+  OpenAI-compatible server, default) / openai / anthropic / gemini / ollama via
+  `src/services/llm_registry.py`, with per-agent llama.cpp slot pinning and a
+  cooldown-based cloud fallback (see [docs/providers.md](docs/providers.md))
 - **Start command (backend)**: `uv run uvicorn main:app --port 2024`
 - **Start command (frontend dev)**: `cd web && npm run dev` (Vite proxies API routes to
   `:2024`, see `web/vite.config.ts`) — in prod, `npm run build` output (`web/dist/`) is
   served directly by FastAPI, no separate frontend server
 - **Entry**: `main.py` → `src/app.py:create_app()`; graph built in the lifespan
-- **4 agents**: conversation (default/router), swiggy, tracker, planner (real `deepagents`
-  deep agent) — coordinated as a swarm
+- **6 agents**: conversation (default/router), swiggy, instamart, dineout, tracker,
+  planner (real `deepagents` deep agent, with an optional `research` subagent) —
+  coordinated as a swarm
 - **Stores**: Postgres (checkpoints + users/chat_threads/reminders/shopping_items),
   Redis (frames/cache/rate-limit/refresh-tokens/guardian-state/geocode-cache), Qdrant (RAG + Mem0)
 - **Auth**: cookie-based JWT sessions with a real signup/login UI — see [Auth & Sessions](#auth--sessions-src-apiauthpy)
@@ -37,15 +41,19 @@ src/
 │                        # serves web/dist/ (React build) for /, /login, /account
 ├── api/                 # chat (SSE + /chat/resume), frames, uploads, events, auth, threads,
 │                        # reminders, shopping, music, guardian, deps
-├── graph/               # state, handoff, swarm (incl. planner + HITL middleware), build (parent graph)
+├── graph/               # state, handoff, middleware (resilience/clock/bridges), swarm
+│                        # (6 agents incl. planner + HITL), build (parent graph)
 ├── memory/              # mem0_client, recall, post_turn, history_index
 ├── rag/                 # qdrant, embeddings, store, ingestion, retrieval_tools, web_cache
-├── services/            # redis_client, frame_buffer, rate_limit, security,
+├── services/            # llm_registry (providers/slots/cooldown), mcp_providers,
+│                        # metrics, redis_client, frame_buffer, rate_limit, security,
 │                        # db, user_store, thread_store, reminder_store, shopping_store,
 │                        # event_broker, reminder_scheduler, guardian
-├── tools/               # vision, system, swiggy_mcp, reminder, shopping, music, news,
-│                        # location, guardian, __init__ (tool sets)
-├── prompts/             # conversation, swiggy, tracker, planner (build_prompt() -> str)
+├── tools/               # vision, system, order (set_active_order), reminder, shopping,
+│                        # music, news, location, guardian, progress, __init__ (tool sets)
+├── prompts/             # conversation, swiggy, instamart, dineout, tracker, planner
+│                        # (build_prompt() -> str; ordering agents also export
+│                        # UNAVAILABLE_NOTE for the provider-down prompt swap)
 ├── commons/constants.py # agent name strings + AGENT_DESCRIPTIONS + GATED_TOOL_NAMES
 ├── models/schema.py     # pydantic request/response
 └── configs/             # settings.py (pydantic-settings), llm.py, logging_config.py
@@ -66,9 +74,10 @@ Everything long-lived is created in the FastAPI **lifespan** and stored on
 2. Shared Redis client (`src/services/redis_client.get_redis()`)
 3. Shared Qdrant client + `ensure_collections()` (creates + dim-checks)
 4. Mem0 (`make_mem0()`) — best-effort; graph runs if it fails
-5. `load_swiggy_tools()` (async) → `apply_swiggy_tools(...)` — **no import-time
-   network calls** (fixed the old `asyncio.run()` antipattern)
-6. `build_graph(checkpointer, mem0)` — must run AFTER `apply_swiggy_tools`
+5. `load_provider_tools("swiggy_food"/"swiggy_instamart"/"swiggy_dineout")`
+   (async, `src/services/mcp_providers.py`) → `apply_mcp_tools(...)` — **no
+   import-time network calls**, and no token → zero network
+6. `build_graph(checkpointer, mem0)` — must run AFTER `apply_mcp_tools`
 7. `asyncio.Queue()` for wake-word events
 
 Shared module-level Redis/Qdrant clients let tools reach them without threading
@@ -117,9 +126,13 @@ START → recall_memories → assistant(swarm) → END
   wrapping needed. Use `system_prompt=`, not the `dynamic_prompt` middleware pattern,
   for the planner's custom instructions: it composes in front of deepagents' own
   default deep-agent prompt instead of replacing it.
-- `create_swarm([conversation, swiggy, tracker, planner], default_active_agent="conversation",
-  state_schema=VisualAssistantState)`. All four agents get `transfer_to_*` handoff tools
-  to every other agent.
+- `create_swarm([conversation, swiggy, instamart, dineout, tracker, planner],
+  default_active_agent="conversation", state_schema=VisualAssistantState)`. All six
+  agents get `transfer_to_*` handoff tools to every other agent (dineout deliberately
+  has no `transfer_to_tracker` — reservations aren't deliveries). The planner may also
+  register a `research` deepagents subagent (utility model + web/doc search) when
+  Tavily is configured; deepagents injects its own SummarizationMiddleware, so the
+  planner must NOT get ours (duplicate-middleware assertion).
 
 ### Guarded handoffs (`handoff.py`)
 
@@ -147,9 +160,13 @@ for the planner.
 both `/chat` (fresh turn, `graph_input` is the normal inputs dict) and `/chat/resume`
 (resuming an interrupted turn, `graph_input` is `Command(resume={"decisions": [...]})`
 built from the same `thread_id`/config). Both call
-`graph.astream(graph_input, config, stream_mode=["messages","updates"], subgraphs=True)`:
+`graph.astream(graph_input, config, stream_mode=["messages","updates","custom"],
+subgraphs=True)`:
 - `{"delta": text}` — `AIMessage` chunks with content and **no tool calls** (filters
   tool/handoff chunks and tool-node output).
+- `{"progress": text}` — long tools push human-readable steps via
+  `src/tools/progress.py::emit_progress` (LangGraph `get_stream_writer`; no-op
+  outside a graph run).
 - `{"agent": name}` — live `active_agent` changes, from `updates` payloads (explicit
   set, else agent node name).
 - `{"tool_call": {"id","name","args","agent"}}` / `{"tool_result": {"id","name",
@@ -177,15 +194,17 @@ Post-turn work is a **FastAPI `BackgroundTasks`** task (not a bare
 ## Human-in-the-loop approvals
 
 `src/commons/constants.py::GATED_TOOL_NAMES` (`dict[str, bool]`) lists tool names
-gated behind approval — seeded with `open_mac_app`. Swiggy MCP's cart-mutation/
-order-placement tool names aren't visible in source (loaded dynamically at runtime,
-`src/tools/swiggy_mcp.py`) — `src/app.py`'s lifespan logs every loaded MCP tool's name
-at startup (`"Swiggy MCP tool available: %s"`) so they can be enumerated and added
-once the MCP server is reachable.
+gated behind approval — `open_mac_app` plus `confirm_order` (the shared
+order-placement tool name on the Swiggy food + instamart MCP servers — this is the
+spend guardrail, enforced at the tool boundary rather than in prompts). Other MCP
+cart-mutation names load dynamically at runtime (`src/services/mcp_providers.py`) —
+`src/app.py`'s lifespan logs every loaded MCP tool's name at startup
+(`"MCP tool available (%s): %s"`) so more can be enumerated and added once the MCP
+servers are reachable.
 
 - **Middleware**: `langchain.agents.middleware.HumanInTheLoopMiddleware(interrupt_on=
-  GATED_TOOL_NAMES)`, attached to every agent (safe even though `SWIGGY_TOOLS`/
-  `TRACKER_TOOLS` are the same list object — gating is by tool name, agent-agnostic).
+  GATED_TOOL_NAMES)`, attached to every agent (gating is by tool name,
+  agent-agnostic — a gated tool is caught no matter which agent calls it).
   **Do not write custom `wrap_tool_call`/`awrap_tool_call` middleware for this** — the
   built-in class already exists and implements `aafter_model` (delegates to sync
   `after_model`), which is what makes it safe to use in this astream-only graph;
@@ -288,11 +307,14 @@ code seams:
 
 `pydantic-settings`, cached via `get_settings()`. `load_dotenv()` runs at import
 so third-party libs see the same env. `embedding_dim` derives from the provider
-(openai=1536, ollama=768) unless `EMBEDDING_DIM` overrides. Tests call
+(openai=1536, ollama=768 — ollama is the default) unless `EMBEDDING_DIM`
+overrides; collection names are dim-suffixed via properties
+(`documents_collection` → `documents_768`). Tests call
 `get_settings.cache_clear()` around env monkeypatches. `AUTH_DISABLED=false`
-requires a real `JWT_SECRET` (validator raises otherwise) — see
-[Auth & Sessions](#auth--sessions-src-apiauthpy) for `ACCESS_TOKEN_TTL_MINUTES`,
-`REFRESH_TOKEN_TTL_DAYS`, `COOKIE_SECURE`.
+with the placeholder `JWT_SECRET` auto-generates + persists a real secret at
+`~/.subagents/jwt_secret` (0600; `SUBAGENTS_JWT_SECRET_FILE` overrides in
+tests) — see [Auth & Sessions](#auth--sessions-src-apiauthpy) for
+`ACCESS_TOKEN_TTL_MINUTES`, `REFRESH_TOKEN_TTL_DAYS`, `COOKIE_SECURE`.
 
 ---
 
@@ -303,16 +325,22 @@ CONVERSATION_TOOLS = [capture_webcam, get_system_info, open_mac_app,
                       get_current_location, search_documents, recall_history,
                       *REMINDER_TOOLS, *SHOPPING_TOOLS, *MUSIC_TOOLS,
                       *GUARDIAN_TOOLS, *web_tools]
-_SWIGGY_BASE_TOOLS = [*SHOPPING_TOOLS, get_current_location]  # non-MCP, always present
-SWIGGY_TOOLS  = [*_SWIGGY_BASE_TOOLS]  # + MCP tools at startup
-TRACKER_TOOLS = []                     # MCP tools at startup
+_SWIGGY_BASE_TOOLS = [*SHOPPING_TOOLS, get_current_location, set_active_order]
+SWIGGY_TOOLS    = [*_SWIGGY_BASE_TOOLS]      # + food MCP tools at startup
+INSTAMART_TOOLS = [*_INSTAMART_BASE_TOOLS]   # + instamart MCP tools at startup
+DINEOUT_TOOLS   = []                         # dineout MCP tools at startup
+TRACKER_TOOLS   = [set_active_order]         # + _TRACKING_TOOL_NAMES whitelist
 ```
 
 - Handoff tools are appended per-agent in `swarm.py`, not stored here.
-- `apply_swiggy_tools(mcp_tools)` **composes** `[*_SWIGGY_BASE_TOOLS, *mcp_tools]`
-  — it must never plain-overwrite `SWIGGY_TOOLS`, or import-time tools (shopping,
+- `apply_mcp_tools(food, instamart, dineout)` **composes** base + MCP lists —
+  it must never plain-overwrite the lists, or import-time tools (shopping,
   location) get silently wiped at startup. The graph is built after it so
-  ToolNodes snapshot the full lists.
+  ToolNodes snapshot the full lists. (`apply_swiggy_tools` is a food-only
+  legacy alias.)
+- **Tracker whitelist**: food + instamart MCP servers share tool names
+  (`get_addresses`, `confirm_order`, …), so the tracker takes only the
+  non-colliding read-only `_TRACKING_TOOL_NAMES` subset — never both full sets.
 - `capture_webcam` is **async** (reads the Redis frame buffer).
 - Tools that need the current user/thread take `config: RunnableConfig` and read
   `config["configurable"]["user_id"/"thread_id"/"location"]` (chat.py builds it).
@@ -388,8 +416,8 @@ TRACKER_TOOLS = []                     # MCP tools at startup
 
 - **Invoke the graph async** — `recall_memories` is async-only; sync `invoke`
   raises. Tests use `ainvoke`.
-- **Build the graph after `apply_swiggy_tools`** — otherwise swiggy/tracker have
-  no MCP tools.
+- **Build the graph after `apply_mcp_tools`** — otherwise the ordering agents and
+  tracker have no MCP tools.
 - **Middleware must implement both sync and async** `wrap_model_call` /
   `awrap_model_call` (we call `astream`).
 - **Don't revive the `text` SSE field for tokens** — use `delta` (frontend
@@ -414,10 +442,11 @@ TRACKER_TOOLS = []                     # MCP tools at startup
   `chat_threads.user_id` has an FK to `users.id`.
 - **`deepagents` requires langgraph>=1.2.7 / langchain>=1.3.11** — a real
   compatibility constraint (see `pyproject.toml`), not just a style preference.
-- **`apply_swiggy_tools` must compose, not overwrite** — it builds
-  `[*_SWIGGY_BASE_TOOLS, *mcp_tools]`; a plain `SWIGGY_TOOLS[:] = mcp_tools`
-  silently wipes the shopping/location tools registered at import time
-  (guarded by `tests/test_shopping_tools.py::test_apply_swiggy_tools_keeps_base_tools`).
+- **`apply_mcp_tools` must compose, not overwrite** — it builds
+  `[*_BASE_TOOLS, *mcp_tools]` per agent; a plain `SWIGGY_TOOLS[:] = mcp_tools`
+  silently wipes the shopping/location/order tools registered at import time
+  (guarded by `tests/test_shopping_tools.py::test_apply_swiggy_tools_keeps_base_tools`
+  and `tests/test_mcp_providers.py`).
 - **The live clock is a trailing message, not a prompt edit** — every agent
   (planner included) gets `LiveClockMiddleware`'s minute-rounded trailing
   SystemMessage. Don't move the clock back into the dynamic prompt: per-call
@@ -442,14 +471,21 @@ caller via the `get_llm` seam), `fakeredis.aioredis`, `AsyncQdrantClient(":memor
 with a fake embedder, stub Mem0, `MemorySaver`, `InMemoryUserStore`/
 `InMemoryThreadStore` (no real Postgres for auth/thread logic either).
 `tests/test_graph_routing.py` is the critical suite (default agent, handoff
-chain, sticky, loop-guard refusal, per-turn reset, bridge pruning).
-`tests/test_hitl.py` covers interrupt/approve/edit/reject on a real gated tool
-(`open_mac_app`, with `subprocess.run` patched). `tests/test_planner_routing.py`
-covers the planner composing into the swarm and delegating onward. No test
+chain, sticky, loop-guard refusal, per-turn reset, bridge pruning);
+`tests/test_ordering_routing.py` extends it to instamart/dineout + the
+provider-unavailable prompt swap. `tests/test_hitl.py` covers
+interrupt/approve/edit/reject on a real gated tool (`open_mac_app`, with
+`subprocess.run` patched). `tests/test_planner_routing.py` covers the planner
+composing into the swarm. Newer suites: `test_llm_registry` /
+`test_resilient_middleware` (providers, slots, cooldown/fallback),
+`test_mcp_providers` (guarded tools, staleness, hot reload, tracker
+whitelist), `test_system_api` (status/metrics/JWT autogen/events cap),
+`test_time_travel` (checkpoint listing + forking), `test_headroom`
+(summarization config, progress, guardian verdict, research subagent). No test
 uses FastAPI's `TestClient` — routes are exercised by unit-testing their
 dependencies/helpers directly (e.g. `get_user_id`, `read_graph_messages`).
 
-No automated test suite exists yet for `web/` — `npm run build` (tsc + vite build)
-and `npx oxlint` are the current gate; the SSE parser (`web/src/api/stream.ts`) and
-`InterruptCard`'s decision-collection logic are the highest-value candidates for a
-future Vitest + React Testing Library setup.
+Frontend gate: `cd web && npm run build && npx oxlint && npm run test` —
+Vitest + React Testing Library cover the SSE parser (split-chunk buffering,
+additive unknown keys, checkpoint_id), InterruptCard decision collection, and
+the theme store.

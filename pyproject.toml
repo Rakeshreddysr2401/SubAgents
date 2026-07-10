@@ -1,7 +1,7 @@
 [project]
 name = "subagents"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.8.0"
+description = "Private multi-agent AI assistant for the Mac — local VLM/LLM server or cloud providers, Swiggy ordering, vision, voice, and durable memory"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
