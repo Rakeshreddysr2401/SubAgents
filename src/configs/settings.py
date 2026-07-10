@@ -80,7 +80,9 @@ class Settings(BaseSettings):
     vision_model: str = Field("", alias="VISION_MODEL")
 
     # --- Embeddings ---
-    embedding_provider: Literal["openai", "ollama"] = Field("openai", alias="EMBEDDING_PROVIDER")
+    # ollama (default) keeps the product fully local / zero-key; openai is the
+    # opt-in quality upgrade. OLLAMA_BASE_URL may point at a LAN server.
+    embedding_provider: Literal["openai", "ollama"] = Field("ollama", alias="EMBEDDING_PROVIDER")
     openai_embedding_model: str = Field("text-embedding-3-small", alias="OPENAI_EMBEDDING_MODEL")
     ollama_embedding_model: str = Field("nomic-embed-text", alias="OLLAMA_EMBEDDING_MODEL")
     ollama_base_url: str = Field("http://localhost:11434", alias="OLLAMA_BASE_URL")
@@ -96,15 +98,24 @@ class Settings(BaseSettings):
     qdrant_url: str = Field("http://localhost:6333", alias="QDRANT_URL")
 
     # --- Memory (Mem0) ---
-    mem0_llm_provider: Literal["openai", "llama_cpp"] = Field("openai", alias="MEM0_LLM_PROVIDER")
+    # "main" (default) = use the same provider as the chat LLM, so a zero-key
+    # local install works out of the box. Fact extraction is noticeably more
+    # reliable on OpenAI — set MEM0_LLM_PROVIDER=openai to upgrade.
+    mem0_llm_provider: Literal["main", "openai", "llama_cpp", "ollama"] = Field(
+        "main", alias="MEM0_LLM_PROVIDER"
+    )
     mem0_llm_model: str = Field("gpt-4o-mini", alias="MEM0_LLM_MODEL")
-    mem0_collection: str = Field("mem0_memories", alias="MEM0_COLLECTION")
+    mem0_collection_name: str = Field("mem0_memories", alias="MEM0_COLLECTION")
     recall_limit: int = Field(5, alias="MEM0_RECALL_LIMIT")
 
     # --- RAG ---
-    documents_collection: str = "documents"
-    history_collection: str = "history"
-    search_cache_collection: str = "search_cache"
+    # Base collection names; the public accessors below suffix them with the
+    # embedding dimension (documents_768, …) so switching embedding providers
+    # is non-destructive: each dim gets its own collections, old ones are
+    # orphaned rather than corrupted (clean up with scripts/migrate_qdrant.py).
+    documents_collection_name: str = Field("documents", alias="DOCUMENTS_COLLECTION")
+    history_collection_name: str = Field("history", alias="HISTORY_COLLECTION")
+    search_cache_collection_name: str = Field("search_cache", alias="SEARCH_CACHE_COLLECTION")
     chunk_size: int = Field(1000, alias="RAG_CHUNK_SIZE")
     chunk_overlap: int = Field(150, alias="RAG_CHUNK_OVERLAP")
     upload_max_bytes: int = Field(10 * 1024 * 1024, alias="UPLOAD_MAX_BYTES")
@@ -216,6 +227,23 @@ class Settings(BaseSettings):
         if self.embedding_dim_override:
             return self.embedding_dim_override
         return _EMBEDDING_DIMS[self.embedding_provider]
+
+    # Dim-suffixed collection names — the only names the rest of the app uses.
+    @property
+    def documents_collection(self) -> str:
+        return f"{self.documents_collection_name}_{self.embedding_dim}"
+
+    @property
+    def history_collection(self) -> str:
+        return f"{self.history_collection_name}_{self.embedding_dim}"
+
+    @property
+    def search_cache_collection(self) -> str:
+        return f"{self.search_cache_collection_name}_{self.embedding_dim}"
+
+    @property
+    def mem0_collection(self) -> str:
+        return f"{self.mem0_collection_name}_{self.embedding_dim}"
 
     @property
     def embedding_model(self) -> str:

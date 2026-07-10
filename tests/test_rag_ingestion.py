@@ -28,7 +28,12 @@ async def rag_env(monkeypatch):
     client = AsyncQdrantClient(":memory:")
     from qdrant_client.models import Distance, VectorParams
 
-    for coll in ("documents", "history", "search_cache"):
+    from src.configs.settings import get_settings
+
+    # Collection names are dim-suffixed off the settings (documents_768, …) —
+    # create whatever the current config resolves to.
+    s = get_settings()
+    for coll in (s.documents_collection, s.history_collection, s.search_cache_collection):
         await client.create_collection(
             coll, vectors_config=VectorParams(size=FakeEmbeddings.DIM, distance=Distance.COSINE)
         )
@@ -53,9 +58,12 @@ async def test_ingest_and_search_documents(rag_env):
     assert result["chunks"] >= 1
     assert result["filename"] == "biology.txt"
 
+    from src.configs.settings import get_settings
     from src.rag.store import search_texts
 
-    hits = await search_texts("documents", "powerhouse of the cell", "alice", limit=3)
+    hits = await search_texts(
+        get_settings().documents_collection, "powerhouse of the cell", "alice", limit=3
+    )
     assert hits
     assert any("mitochondria" in h["text"] for h in hits)
 
@@ -67,7 +75,11 @@ async def test_search_is_user_scoped(rag_env):
     await ingest_document("alice", "a.txt", b"alice secret pancake recipe")
     await ingest_document("bob", "b.txt", b"bob secret waffle recipe")
 
-    alice_hits = await search_texts("documents", "secret recipe", "alice", limit=5)
+    from src.configs.settings import get_settings
+
+    alice_hits = await search_texts(
+        get_settings().documents_collection, "secret recipe", "alice", limit=5
+    )
     assert alice_hits
     assert all(h["user_id"] == "alice" for h in alice_hits)
     assert not any("waffle" in h["text"] for h in alice_hits)

@@ -1,9 +1,10 @@
 """Mem0 long-term memory client (self-hosted, Qdrant-backed).
 
 Mem0 uses an LLM internally to extract durable facts from conversation. That
-LLM is configured independently of the chat model (MEM0_LLM_PROVIDER) because
-fact extraction needs reliable JSON — keep it on OpenAI even when the chat
-model is a local llama.cpp/Ollama server.
+LLM is configured independently of the chat model: MEM0_LLM_PROVIDER defaults
+to "main" (follow the chat provider — zero-key local installs work out of the
+box), but fact extraction produces noticeably better JSON on OpenAI — set
+MEM0_LLM_PROVIDER=openai to upgrade when a key is available.
 """
 
 from mem0 import AsyncMemory
@@ -17,14 +18,38 @@ logger = get_logger(__name__)
 
 def _mem0_llm_config() -> dict:
     s = get_settings()
-    if s.mem0_llm_provider == "llama_cpp":
+    provider = s.mem0_llm_provider
+    if provider == "main":
+        # Follow the chat model's provider; cloud chat keeps cloud extraction.
+        provider = {
+            "llama_cpp": "llama_cpp",
+            "ollama": "ollama",
+            "openai": "openai",
+            "anthropic": "anthropic",
+            "gemini": "gemini",
+        }[s.llm_provider]
+    if provider == "llama_cpp":
         return {
             "provider": "openai",  # OpenAI-compatible endpoint
             "config": {
-                "model": s.model_name,
-                "openai_base_url": s.llama_cpp_base_url,
+                "model": s.llm_model or s.model_name,
+                "openai_base_url": s.llm_base_url or s.llama_cpp_base_url,
                 "api_key": "not-needed",
             },
+        }
+    if provider == "ollama":
+        return {
+            "provider": "ollama",
+            "config": {
+                "model": s.llm_model or s.model_name,
+                "ollama_base_url": s.ollama_base_url,
+            },
+        }
+    if provider in ("anthropic", "gemini"):
+        # mem0 has native providers for both; API keys come from the standard
+        # env vars (ANTHROPIC_API_KEY / GOOGLE_API_KEY).
+        return {"provider": provider, "config": {"model": s.llm_model}} if s.llm_model else {
+            "provider": provider, "config": {}
         }
     return {"provider": "openai", "config": {"model": s.mem0_llm_model}}
 
