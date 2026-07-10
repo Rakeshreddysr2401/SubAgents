@@ -32,6 +32,12 @@ class EventBroker:
     def unsubscribe(self, queue: asyncio.Queue) -> None:
         self._subscribers = [s for s in self._subscribers if s.queue is not queue]
 
+    def subscriber_count(self, user_id: str | None = None) -> int:
+        """Active subscriptions for one user (or everyone with None)."""
+        if user_id is None:
+            return len(self._subscribers)
+        return sum(1 for s in self._subscribers if s.user_id == user_id)
+
     def broadcast(self, payload: dict, user_id: str | None = None) -> int:
         """Push a JSON event to every subscriber of `user_id` (None = everyone).
 

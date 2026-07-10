@@ -23,6 +23,7 @@ from src.api import (
     music,
     reminders,
     shopping,
+    system,
     threads,
     uploads,
 )
@@ -192,7 +193,30 @@ def _maybe_start_wake_word(app: FastAPI, settings):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="SubAgents API", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="SubAgents API", version="0.3.0", lifespan=lifespan)
+
+    settings = get_settings()
+    # Same-origin by default (the SPA is served by this process). CORS_ORIGINS
+    # opts additional browser origins in, e.g. a LAN hostname running the Vite
+    # dev server against this backend.
+    if settings.cors_origins:
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_credentials=True,  # cookie-based sessions
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        return response
 
     # React SPA (web/), built via `npm run build` in web/ -> web/dist/. Vite's
     # index.html references /assets/*.js|css and /favicon.svg directly, so
@@ -227,6 +251,7 @@ def create_app() -> FastAPI:
     async def account_page():
         return _serve_spa()
 
+    app.include_router(system.router)
     app.include_router(auth.router)
     app.include_router(chat.router)
     app.include_router(frames.router)

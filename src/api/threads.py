@@ -6,9 +6,8 @@ actual messages live in the LangGraph checkpointer, keyed by thread_id.
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from src.api.auth import get_user_id
 from src.api.chat import read_graph_messages
-from src.api.deps import validate_thread_id
+from src.api.deps import rate_limited_user, validate_thread_id
 from src.models.schema import RenameThreadRequest, ThreadOut
 
 router = APIRouter(prefix="/threads", tags=["threads"])
@@ -24,14 +23,14 @@ def _to_out(thread) -> ThreadOut:
 
 
 @router.get("", response_model=list[ThreadOut])
-async def list_threads(request: Request, user_id: str = Depends(get_user_id)):
+async def list_threads(request: Request, user_id: str = Depends(rate_limited_user)):
     threads = await request.app.state.thread_store.list_for_user(user_id)
     return [_to_out(t) for t in threads]
 
 
 @router.get("/{thread_id}/messages")
 async def thread_messages(
-    thread_id: str, request: Request, user_id: str = Depends(get_user_id)
+    thread_id: str, request: Request, user_id: str = Depends(rate_limited_user)
 ):
     tid = validate_thread_id(thread_id)
     thread = await request.app.state.thread_store.get(tid)
@@ -46,7 +45,7 @@ async def rename_thread(
     thread_id: str,
     req: RenameThreadRequest,
     request: Request,
-    user_id: str = Depends(get_user_id),
+    user_id: str = Depends(rate_limited_user),
 ):
     tid = validate_thread_id(thread_id)
     ok = await request.app.state.thread_store.rename(tid, user_id, req.title)
@@ -57,7 +56,7 @@ async def rename_thread(
 
 
 @router.delete("/{thread_id}")
-async def delete_thread(thread_id: str, request: Request, user_id: str = Depends(get_user_id)):
+async def delete_thread(thread_id: str, request: Request, user_id: str = Depends(rate_limited_user)):
     tid = validate_thread_id(thread_id)
     ok = await request.app.state.thread_store.delete(tid, user_id)
     if not ok:

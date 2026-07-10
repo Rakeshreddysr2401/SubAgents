@@ -130,6 +130,9 @@ class Settings(BaseSettings):
 
     # --- Auth ---
     auth_disabled: bool = Field(True, alias="AUTH_DISABLED")
+    # When auth is enabled and JWT_SECRET is left at the placeholder, a real
+    # secret is auto-generated and persisted to ~/.subagents/jwt_secret
+    # (chmod 600) so a shipped product never runs on a known secret.
     jwt_secret: str = Field("change-me-in-production", alias="JWT_SECRET")
     jwt_algorithm: str = Field("HS256", alias="JWT_ALGORITHM")
     access_token_ttl_minutes: int = Field(15, alias="ACCESS_TOKEN_TTL_MINUTES")
@@ -142,6 +145,16 @@ class Settings(BaseSettings):
     frame_ttl_seconds: int = Field(120, alias="FRAME_TTL_SECONDS")
     chat_timeout_seconds: int = Field(120, alias="CHAT_TIMEOUT_SECONDS")
     rate_limit_per_minute: int = Field(20, alias="RATE_LIMIT_PER_MINUTE")
+    # Higher ceiling for cheap CRUD (threads/reminders/shopping/music/guardian)
+    # — the chat limit above stays the tight one.
+    api_rate_limit_per_minute: int = Field(120, alias="API_RATE_LIMIT_PER_MINUTE")
+    # Max concurrent /events SSE connections per user (tabs).
+    events_max_connections_per_user: int = Field(8, alias="EVENTS_MAX_CONNECTIONS_PER_USER")
+    # Bearer token protecting GET /metrics (Prometheus). Empty = disabled (404).
+    metrics_token: str = Field("", alias="METRICS_TOKEN")
+    # JSON list of extra allowed browser origins (e.g. a LAN hostname serving
+    # the SPA separately). Empty = same-origin only, no CORS headers at all.
+    cors_origins_json: str = Field("[]", alias="CORS_ORIGINS")
     # Speak replies through the host Mac's `say` command as well (the browser
     # speaks via speechSynthesis regardless — this is only for the server box).
     host_tts_enabled: bool = Field(False, alias="HOST_TTS_ENABLED")
@@ -201,6 +214,17 @@ class Settings(BaseSettings):
         return {}
 
     @property
+    def cors_origins(self) -> list[str]:
+        """Parsed CORS_ORIGINS; malformed JSON degrades to same-origin only."""
+        try:
+            origins = json.loads(self.cors_origins_json)
+            if isinstance(origins, list):
+                return [o for o in origins if isinstance(o, str) and o]
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return []
+
+    @property
     def agent_llm_overrides(self) -> dict[str, dict]:
         """Parsed AGENT_LLM_OVERRIDES; malformed JSON degrades to no overrides."""
         try:
@@ -252,10 +276,41 @@ class Settings(BaseSettings):
         return self.ollama_embedding_model
 
     @model_validator(mode="after")
-    def _warn_insecure_prod(self) -> "Settings":
+    def _ensure_real_secret(self) -> "Settings":
+        # A shipped product must never run auth on the known placeholder
+        # secret — but requiring users to hand-edit .env is a setup cliff.
+        # Auto-generate and persist one instead.
         if not self.auth_disabled and self.jwt_secret == "change-me-in-production":
-            raise ValueError("AUTH_DISABLED=false requires a real JWT_SECRET")
+            self.jwt_secret = _load_or_create_jwt_secret()
         return self
+
+
+def _load_or_create_jwt_secret() -> str:
+    """A stable machine-local secret at ~/.subagents/jwt_secret (chmod 600)."""
+    import logging
+    import os
+    import secrets as _secrets
+    from pathlib import Path
+
+    path = Path(
+        os.getenv("SUBAGENTS_JWT_SECRET_FILE", "~/.subagents/jwt_secret")
+    ).expanduser()
+    try:
+        if path.exists():
+            secret = path.read_text().strip()
+            if len(secret) >= 32:
+                return secret
+        secret = _secrets.token_urlsafe(48)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(secret)
+        path.chmod(0o600)
+        logging.getLogger(__name__).info("Generated JWT secret at %s", path)
+        return secret
+    except OSError as e:
+        raise ValueError(
+            f"AUTH_DISABLED=false needs a JWT secret, and auto-generating one at "
+            f"{path} failed ({e}). Set JWT_SECRET explicitly."
+        ) from e
 
 
 @lru_cache

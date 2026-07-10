@@ -214,6 +214,9 @@ def _guard_tool(tool, spec: ProviderSpec):
         try:
             return await tool.coroutine(**kwargs)
         except Exception as e:
+            from src.services import metrics
+
+            metrics.inc("mcp_tool_failures_total")
             cause = _root_cause(e)
             if _is_auth_error(cause):
                 mark_domain_stale(spec.auth_domain, str(cause))

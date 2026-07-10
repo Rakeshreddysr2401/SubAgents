@@ -77,12 +77,15 @@ def test_mem0_llm_config_follows_main_provider(monkeypatch):
     get_settings.cache_clear()
 
 
-def test_auth_enabled_requires_real_secret(monkeypatch):
+def test_auth_enabled_never_runs_on_placeholder_secret(monkeypatch, tmp_path):
+    """Placeholder secret + auth enabled → a real secret is auto-generated
+    (see tests/test_system_api.py for persistence/permissions details)."""
     from src.configs.settings import Settings
 
+    monkeypatch.setenv("SUBAGENTS_JWT_SECRET_FILE", str(tmp_path / "jwt_secret"))
     monkeypatch.setenv("AUTH_DISABLED", "false")
     monkeypatch.setenv("JWT_SECRET", "change-me-in-production")
-    with pytest.raises(Exception, match="JWT_SECRET"):
-        Settings()
+    assert Settings().jwt_secret != "change-me-in-production"
     monkeypatch.setenv("JWT_SECRET", "s3cret")
     assert Settings().auth_disabled is False
+    assert Settings().jwt_secret == "s3cret"

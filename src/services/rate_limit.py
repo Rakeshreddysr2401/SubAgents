@@ -16,13 +16,17 @@ from src.services import redis_client
 logger = get_logger(__name__)
 
 
-async def enforce_rate_limit(scope: str, user_id: str) -> None:
+async def enforce_rate_limit(scope: str, user_id: str, limit: int | None = None) -> None:
     """Raise HTTP 429 if `user_id` exceeded the per-minute limit for `scope`.
 
     Fails open: if Redis is unavailable the request is allowed rather than
     breaking the assistant (the graph itself only needs Postgres).
+
+    `limit` overrides the default RATE_LIMIT_PER_MINUTE for cheaper scopes
+    (e.g. the shared "api" bucket uses API_RATE_LIMIT_PER_MINUTE).
     """
-    limit = get_settings().rate_limit_per_minute
+    if limit is None:
+        limit = get_settings().rate_limit_per_minute
     if limit <= 0:
         return
     bucket = int(time.time()) // 60

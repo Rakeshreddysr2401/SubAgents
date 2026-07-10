@@ -34,6 +34,7 @@ from src.configs.logging_config import get_logger
 from src.configs.settings import get_settings
 from src.memory.post_turn import run_post_turn
 from src.models.schema import ChatRequest, ResumeRequest
+from src.services import metrics
 from src.services.mcp_providers import refresh_tokens_if_changed
 from src.services.rate_limit import enforce_rate_limit
 from src.tools.audio_tools import speak_out_loud
@@ -197,6 +198,7 @@ def _stream_graph_events(
                                 if i.id in seen_interrupts:
                                     continue
                                 seen_interrupts.add(i.id)
+                                metrics.inc("interrupts_total")
                                 yield _sse({"interrupt": {"id": i.id, **i.value}})
                             continue
                         agent = _extract_active_agent(payload)
@@ -217,10 +219,12 @@ def _stream_graph_events(
                             yield _sse({"tool_result": tr})
         except (TimeoutError, asyncio.TimeoutError):
             logger.error("Graph execution timed out for thread=%s", tid)
+            metrics.inc("chat_errors_total")
             yield _sse({"error": "Request timed out"})
             return
         except Exception as e:
             logger.exception("Streaming chat failed for thread=%s", tid)
+            metrics.inc("chat_errors_total")
             yield _sse({"error": str(e)})
             return
 
@@ -269,6 +273,7 @@ async def chat(
         "always_speak": req.always_speak,
         "agent_turn_visits": {},
     }
+    metrics.inc("chat_turns_total")
     logger.info("Chat request: thread=%s, query=%s", tid, req.query[:80])
     return _stream_graph_events(
         request.app, inputs, config, tid, user_id, background_tasks, req.always_speak

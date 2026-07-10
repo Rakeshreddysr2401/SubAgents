@@ -5,8 +5,7 @@ src/services/guardian.py state."""
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from src.api.auth import get_user_id
-from src.api.deps import validate_thread_id
+from src.api.deps import rate_limited_user, validate_thread_id
 from src.services import guardian
 from src.services.event_broker import get_broker
 
@@ -19,7 +18,7 @@ class EnableGuardianRequest(BaseModel):
 
 @router.post("/enable")
 async def enable(
-    req: EnableGuardianRequest, request: Request, user_id: str = Depends(get_user_id)
+    req: EnableGuardianRequest, request: Request, user_id: str = Depends(rate_limited_user)
 ):
     tid = validate_thread_id(req.thread_id)
     # Same ownership rule as /ws/frames: an existing thread must be the
@@ -33,14 +32,14 @@ async def enable(
 
 
 @router.post("/disable")
-async def disable(user_id: str = Depends(get_user_id)):
+async def disable(user_id: str = Depends(rate_limited_user)):
     await guardian.disable_guardian(user_id)
     get_broker().broadcast({"type": "guardian_status", "status": "disabled"}, user_id)
     return {"status": "disabled"}
 
 
 @router.get("/status")
-async def status(user_id: str = Depends(get_user_id)):
+async def status(user_id: str = Depends(rate_limited_user)):
     state = await guardian.guardian_state(user_id)
     if state is None:
         return {"enabled": False, "thread_id": None}

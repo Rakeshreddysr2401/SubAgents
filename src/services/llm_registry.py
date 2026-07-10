@@ -121,22 +121,32 @@ def primary_available() -> bool:
 
 def report_primary_failure() -> None:
     """Mark the primary down for PRIMARY_COOLDOWN_S (connection errors only)."""
+    from src.services import metrics
+
     global _primary_down_until
     with _health_lock:
         _primary_down_until = time.monotonic() + PRIMARY_COOLDOWN_S
+    metrics.inc("llm_primary_failures_total")
+    metrics.set_gauge("llm_primary_up", 0)
     logger.warning("Primary LLM marked down for %.0fs", PRIMARY_COOLDOWN_S)
 
 
 def report_primary_success() -> None:
+    from src.services import metrics
+
     global _primary_down_until
     with _health_lock:
         _primary_down_until = 0.0
+    metrics.set_gauge("llm_primary_up", 1)
 
 
 def report_fallback_used() -> None:
+    from src.services import metrics
+
     global _fallback_used_total
     with _health_lock:
         _fallback_used_total += 1
+    metrics.inc("llm_fallback_used_total")
 
 
 def reset_health() -> None:

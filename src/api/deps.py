@@ -2,7 +2,21 @@
 
 from uuid import UUID
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
+
+from src.api.auth import get_user_id
+from src.configs.settings import get_settings
+from src.services.rate_limit import enforce_rate_limit
+
+
+async def rate_limited_user(user_id: str = Depends(get_user_id)) -> str:
+    """get_user_id + the shared "api" rate-limit bucket for cheap CRUD routes.
+
+    Chat/upload/auth keep their own tighter buckets; this one covers
+    threads/reminders/shopping/music/guardian panel traffic.
+    """
+    await enforce_rate_limit("api", user_id, limit=get_settings().api_rate_limit_per_minute)
+    return user_id
 
 
 def validate_thread_id(tid: str) -> str:
