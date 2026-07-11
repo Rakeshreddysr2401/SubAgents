@@ -51,6 +51,22 @@ function newId(): string {
   return crypto.randomUUID();
 }
 
+function storedOpen(key: string): boolean {
+  try {
+    return window.localStorage.getItem(key) !== "closed";
+  } catch {
+    return true;
+  }
+}
+
+function storeOpen(key: string, open: boolean): void {
+  try {
+    window.localStorage.setItem(key, open ? "open" : "closed");
+  } catch {
+    // non-persistent session — fine
+  }
+}
+
 /** Time travel state: the checkpoint to fork from + the text being edited. */
 interface RewindState {
   checkpointId: string | null; // null = restart the thread from scratch
@@ -83,6 +99,11 @@ export function ChatView() {
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [rewind, setRewind] = useState<RewindState | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(() => storedOpen("ui-threads-rail"));
+  const [panelsOpen, setPanelsOpen] = useState(() => storedOpen("ui-panels-rail"));
+
+  const toggleSidebar = () => setSidebarOpen((v) => (storeOpen("ui-threads-rail", !v), !v));
+  const togglePanels = () => setPanelsOpen((v) => (storeOpen("ui-panels-rail", !v), !v));
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
@@ -200,7 +221,9 @@ export function ChatView() {
       if ("tool_result" in event) {
         addToolResult(event.tool_result);
         setMessages((prev) =>
-          prev.map((m) => (m.id === botId ? { ...m, toolActivity: useChatStream.getState().toolTimeline } : m)),
+          prev.map((m) => (m.id === botId
+            ? { ...m, toolActivity: useChatStream.getState().toolTimeline, progressText: undefined }
+            : m)),
         );
         continue;
       }
@@ -327,6 +350,32 @@ export function ChatView() {
       <ToastStack />
       <div className="header">
         <div className="header-left">
+          <button
+            className={`rail-toggle${sidebarOpen ? " on" : ""}`}
+            onClick={toggleSidebar}
+            title={sidebarOpen ? "Hide conversations" : "Show conversations"}
+            aria-label="Toggle conversations sidebar"
+            type="button"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="3" />
+              <line x1="9" y1="3" x2="9" y2="21" />
+            </svg>
+          </button>
+          <button
+            className={`rail-toggle${panelsOpen ? " on" : ""}`}
+            onClick={togglePanels}
+            title={panelsOpen ? "Hide panels" : "Show panels (camera, reminders, shopping, music)"}
+            aria-label="Toggle panels rail"
+            type="button"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1.5" />
+              <rect x="14" y="3" width="7" height="7" rx="1.5" />
+              <rect x="3" y="14" width="7" height="7" rx="1.5" />
+              <rect x="14" y="14" width="7" height="7" rx="1.5" />
+            </svg>
+          </button>
           <div className="logo-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 2L2 7l10 5 10-5-10-5z" />
@@ -379,13 +428,16 @@ export function ChatView() {
         <ThreadSidebar
           threads={threads}
           activeThreadId={threadId}
+          open={sidebarOpen}
           onSelect={selectThread}
           onDelete={(id) => { deleteThread(id); if (id === threadId) startNewThread(); }}
           onRename={renameThread}
           onNewThread={startNewThread}
         />
 
-        <div className="left-panel">
+        {/* Kept mounted when closed (CSS collapse) so the camera stream and
+            panel state survive hiding the rail. */}
+        <div className={`left-panel${panelsOpen ? "" : " closed"}`}>
           <div className="section-label">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
             Panels

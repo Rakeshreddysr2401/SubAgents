@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { addCopyButtons, renderMarkdown } from "../../utils/markdown";
-import { ToolActivityCard } from "./ToolActivityCard";
+import { ActivityTrail, friendlyToolName } from "./ToolActivityCard";
 import type { ToolActivityItem } from "../../state/chatStream";
 import "./Messages.css";
 
@@ -9,7 +9,7 @@ export interface ChatMessage {
   role: "user" | "bot";
   content: string;
   thinking?: boolean;
-  /** Live progress line from a long-running tool (progress SSE event). */
+  /** Live progress line from a long-running tool (writer/custom stream). */
   progressText?: string;
   toolActivity?: ToolActivityItem[];
 }
@@ -17,6 +17,19 @@ export interface ChatMessage {
 interface MessageBubbleProps extends ChatMessage {
   /** "Edit & resend from here" (time travel) — only offered on user messages. */
   onRewind?: () => void;
+}
+
+/** What the single in-bubble status line should say while the reply is being
+ * worked on. Priority: a specific progress line pushed by the tool itself
+ * (LangGraph writer channel) > the tool currently running > the last
+ * finished step > plain "Thinking". */
+function statusText(progressText: string | undefined, toolActivity: ToolActivityItem[] | undefined): string {
+  if (progressText) return progressText;
+  const running = toolActivity?.filter((t) => t.status === "calling") ?? [];
+  if (running.length > 0) return `${friendlyToolName(running[running.length - 1].name)}…`;
+  const done = toolActivity?.filter((t) => t.status === "done") ?? [];
+  if (done.length > 0) return `${friendlyToolName(done[done.length - 1].name)} ✓`;
+  return "Thinking";
 }
 
 export function MessageBubble({ role, content, thinking, progressText, toolActivity, onRewind }: MessageBubbleProps) {
@@ -57,22 +70,25 @@ export function MessageBubble({ role, content, thinking, progressText, toolActiv
           <div className="bubble">{content}</div>
         </>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {toolActivity && toolActivity.length > 0 && <ToolActivityCard items={toolActivity} />}
-          <div className={`bubble${thinking ? " thinking-active" : ""}`}>
-            {thinking ? (
-              <div className="thinking-label">
-                {progressText || "Thinking"}
-                <span className="tdots"><span /><span /><span /></span>
-              </div>
-            ) : (
+        // ONE bubble per reply: while working it carries the live status
+        // line; once text arrives the steps collapse into a tiny trail above
+        // the answer. No stacked cards, no duplicate avatars.
+        <div className={`bubble${thinking ? " thinking-active" : ""}`}>
+          {thinking ? (
+            <div className="thinking-label">
+              {statusText(progressText, toolActivity)}
+              <span className="tdots"><span /><span /><span /></span>
+            </div>
+          ) : (
+            <>
+              {toolActivity && toolActivity.length > 0 && <ActivityTrail items={toolActivity} />}
               <div
                 ref={mdRef}
                 className="md-content"
                 dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
               />
-            )}
-          </div>
+            </>
+          )}
         </div>
       )}
     </div>

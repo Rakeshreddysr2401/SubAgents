@@ -5,13 +5,14 @@ import { timeAgo } from "../../hooks/useThreads";
 interface ThreadSidebarProps {
   threads: Thread[];
   activeThreadId: string;
+  open?: boolean;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onNewThread: () => void;
 }
 
-export function ThreadSidebar({ threads, activeThreadId, onSelect, onDelete, onRename, onNewThread }: ThreadSidebarProps) {
+export function ThreadSidebar({ threads, activeThreadId, open = true, onSelect, onDelete, onRename, onNewThread }: ThreadSidebarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
 
@@ -26,7 +27,7 @@ export function ThreadSidebar({ threads, activeThreadId, onSelect, onDelete, onR
   };
 
   return (
-    <div className="history-sidebar">
+    <div className={`history-sidebar${open ? "" : " closed"}`}>
       <button className="new-chat-btn" onClick={onNewThread} type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <line x1="12" y1="5" x2="12" y2="19" />

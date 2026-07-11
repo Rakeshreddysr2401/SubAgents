@@ -16,5 +16,8 @@ async def get_latest_news(topic: str) -> str:
     Args:
         topic: What to get news about, e.g. "AI", "cricket", "world news".
     """
+    from src.tools.progress import emit_progress
+
+    emit_progress(f"Fetching the latest {topic} news…")
     today = date.today().isoformat()
     return await cached_search(f"latest news {topic} {today}")

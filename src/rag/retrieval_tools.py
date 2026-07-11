@@ -25,6 +25,9 @@ def _user_id(config: RunnableConfig) -> str:
 async def search_documents(query: str, config: RunnableConfig) -> str:
     """Search the user's uploaded documents for information relevant to the query.
     Use this whenever the user asks about the contents of files they have uploaded."""
+    from src.tools.progress import emit_progress
+
+    emit_progress("Searching your documents…")
     settings = get_settings()
     hits = await search_texts(
         settings.documents_collection, query, _user_id(config), limit=5
@@ -42,6 +45,9 @@ async def search_documents(query: str, config: RunnableConfig) -> str:
 async def recall_history(query: str, config: RunnableConfig) -> str:
     """Recall past conversations or things the user showed the camera earlier.
     Use for questions like 'what did we talk about' or 'what did I show you last week'."""
+    from src.tools.progress import emit_progress
+
+    emit_progress("Looking back through our history…")
     settings = get_settings()
     hits = await search_texts(
         settings.history_collection, query, _user_id(config), limit=5
