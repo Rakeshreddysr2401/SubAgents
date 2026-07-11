@@ -1,11 +1,8 @@
-UNAVAILABLE_NOTE = """
+from src.prompts._shared import mcp_unavailable_note
 
-IMPORTANT: Grocery ordering is temporarily unavailable — the Swiggy Instamart
-service is not reachable right now (not configured, or its login has expired),
-so you CANNOT search products or place orders. Do not call any ordering tools.
-Tell the user grocery ordering is temporarily unavailable and to try again
-later, then call transfer_to_conversation(reason="instamart_unavailable").
-"""
+unavailable_note = mcp_unavailable_note(
+    "Grocery ordering", "search products or place orders", "instamart_unavailable"
+)
 
 
 def build_prompt() -> str:

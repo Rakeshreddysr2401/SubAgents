@@ -299,6 +299,28 @@ def provider_ok(name: str) -> bool:
         return bool(_tools.get(name)) and PROVIDERS[name].auth_domain not in _stale
 
 
+def provider_unavailable_reason(name: str) -> str | None:
+    """Why an ordering agent can't act, for a *specific, honest* prompt note:
+
+    - None            → the provider is fine (tools loaded, login live).
+    - "expired"       → we had a login but a 401 marked it stale.
+    - "not_connected" → no token was ever configured for this auth domain.
+
+    Distinguishing these matters: "try again later" is wrong for a provider
+    that was never set up — that needs a one-time login, not patience.
+    """
+    spec = PROVIDERS[name]
+    with _lock:
+        if _tools.get(name) and spec.auth_domain not in _stale:
+            return None
+        if spec.auth_domain in _stale:
+            return "expired"
+    # Not stale but no tools: either never-configured or a transient load
+    # failure. A resolvable token means "configured but couldn't load"; treat
+    # the common case (no token at all) as not_connected.
+    return "expired" if _resolve_token(spec) else "not_connected"
+
+
 def status() -> dict:
     """Provider/token health for /status. Never contains token values."""
     with _lock:

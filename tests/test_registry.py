@@ -31,11 +31,19 @@ def test_no_handoff_exclusions_reference_real_agents():
             assert peer != spec.name
 
 
-def test_mcp_agents_carry_unavailable_notes():
+def test_mcp_agents_carry_reason_aware_unavailable_notes():
     for spec in AGENT_SPECS.values():
         if spec.mcp_provider:
-            note = getattr(spec.prompt_module, "UNAVAILABLE_NOTE", "")
-            assert "unavailable" in note.lower(), spec.name
+            fn = getattr(spec.prompt_module, "unavailable_note", None)
+            assert callable(fn), spec.name
+            not_connected = fn("not_connected")
+            expired = fn("expired")
+            # Never-connected points at setup; expired points at re-auth. Both
+            # explicitly forbid the misleading "try again later".
+            assert "not connected yet" in not_connected.lower(), spec.name
+            assert "settings" in not_connected.lower(), spec.name
+            assert 'not say "try again later"' in not_connected.lower(), spec.name
+            assert "expired" in expired.lower(), spec.name
 
 
 def test_prompt_modules_build():

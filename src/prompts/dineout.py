@@ -1,11 +1,8 @@
-UNAVAILABLE_NOTE = """
+from src.prompts._shared import mcp_unavailable_note
 
-IMPORTANT: Table reservations are temporarily unavailable — the Swiggy Dineout
-service is not reachable right now (not configured, or its login has expired),
-so you CANNOT search restaurants or book tables. Do not call any booking
-tools. Tell the user table booking is temporarily unavailable and to try again
-later, then call transfer_to_conversation(reason="dineout_unavailable").
-"""
+unavailable_note = mcp_unavailable_note(
+    "Table reservations", "search restaurants or book tables", "dineout_unavailable"
+)
 
 
 def build_prompt() -> str:

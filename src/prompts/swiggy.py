@@ -1,16 +1,13 @@
-# Appended to the prompt by the dynamic-prompt middleware while the Swiggy
-# food MCP provider is unavailable (never configured, unreachable, or its
-# login expired). Without it the model flails with the only tools it has left
-# (shopping list, location) and loops until the guarded-handoff cap ends the
-# turn.
-UNAVAILABLE_NOTE = """
+# Appended by the dynamic-prompt middleware while the Swiggy food MCP provider
+# isn't serving tools. The note is reason-aware (not_connected vs expired) so
+# the model never tells the user to "try again later" for a provider that was
+# simply never set up. Without it the model flails with the few non-MCP tools
+# it has left and loops until the guarded-handoff cap ends the turn.
+from src.prompts._shared import mcp_unavailable_note
 
-IMPORTANT: Food ordering is temporarily unavailable — the Swiggy service is
-not reachable right now (not configured, or its login has expired), so you
-CANNOT search restaurants, browse menus, or place orders. Do not call any
-ordering tools. Tell the user food ordering is temporarily unavailable and to
-try again later, then call transfer_to_conversation(reason="swiggy_unavailable").
-"""
+unavailable_note = mcp_unavailable_note(
+    "Food ordering", "search restaurants, browse menus, or place orders", "swiggy_unavailable"
+)
 
 
 def build_prompt() -> str:

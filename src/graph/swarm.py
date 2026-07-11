@@ -33,24 +33,26 @@ from src.graph.state import PlannerAgentState, VisualAgentState, VisualAssistant
 
 
 def _make_prompt_middleware(base_prompt: str, mcp_provider: str | None = None,
-                            unavailable_note: str = ""):
+                            unavailable_note=None):
     # KV-cache discipline: the prompt must be STATIC across turns — anything
     # per-turn (recalled memories, the live clock) goes into the trailing
     # message appended by LiveClockMiddleware instead, so the prompt + history
     # prefix stays cached in the agent's llama.cpp slot.
     #
     # mcp_provider/unavailable_note is the only dynamic part: when the agent's
-    # MCP provider isn't serving tools (never configured, unreachable, or
-    # login expired), the note is appended so the model tells the user instead
-    # of flailing with the few non-MCP tools it has left (pi5's provider_ok
-    # prompt swap; it costs one re-prefill and only fires on expiry/re-login).
+    # MCP provider isn't serving tools, a reason-aware note is appended
+    # (not_connected vs expired) so the model tells the user honestly instead
+    # of flailing with the few non-MCP tools it has left. Only two distinct
+    # prompt strings ever exist per agent, so the swap costs one re-prefill and
+    # only fires on connect/expiry.
     @dynamic_prompt
     def agent_prompt(request: ModelRequest) -> str:
-        if mcp_provider is not None:
-            from src.services.mcp_providers import provider_ok
+        if mcp_provider is not None and unavailable_note is not None:
+            from src.services.mcp_providers import provider_unavailable_reason
 
-            if not provider_ok(mcp_provider):
-                return base_prompt + unavailable_note
+            reason = provider_unavailable_reason(mcp_provider)
+            if reason is not None:
+                return base_prompt + unavailable_note(reason)
         return base_prompt
 
     return agent_prompt
@@ -204,7 +206,7 @@ def build_swarm_graph() -> StateGraph:
                 [*spec.tools(), *transfers],
                 prompt,
                 mcp_provider=spec.mcp_provider,
-                unavailable_note=getattr(spec.prompt_module, "UNAVAILABLE_NOTE", ""),
+                unavailable_note=getattr(spec.prompt_module, "unavailable_note", None),
                 vision=spec.vision,
             ))
 

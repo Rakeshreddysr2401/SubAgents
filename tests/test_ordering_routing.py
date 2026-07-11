@@ -93,17 +93,21 @@ async def test_handoff_to_dineout(make_graph):
 
 
 async def test_unavailable_note_appended_when_provider_down(make_graph):
-    """Fresh state = no MCP tools loaded → provider_ok is False → the swiggy
-    agent's prompt carries the unavailable note (stops tool-loop flailing)."""
+    """Fresh state = no token, no tools → the swiggy agent's prompt carries
+    the not_connected note (stops tool-loop flailing) and never tells the
+    user to 'try again later'."""
     graph, fake = make_graph(
         [
             _tool_call("transfer_to_swiggy", {"reason": "dosa"}),
-            AIMessage(content="Sorry, ordering is down right now."),
+            AIMessage(content="Let's get your Swiggy connected first."),
         ]
     )
     await graph.ainvoke(_inputs("order dosa"), CFG)
     swiggy_prompt = fake.calls[1][0].content
-    assert "Food ordering is temporarily unavailable" in swiggy_prompt
+    assert "not connected yet" in swiggy_prompt
+    assert "Settings → Integrations" in swiggy_prompt
+    # It instructs the model NOT to stall the user with "try again later".
+    assert 'do not say "try again later"' in swiggy_prompt
 
 
 async def test_unavailable_note_absent_when_provider_ok(make_graph, monkeypatch):
@@ -113,10 +117,10 @@ async def test_unavailable_note_absent_when_provider_ok(make_graph, monkeypatch)
             AIMessage(content="Here are options."),
         ]
     )
-    monkeypatch.setattr("src.services.mcp_providers.provider_ok", lambda name: True)
+    monkeypatch.setattr("src.services.mcp_providers.provider_unavailable_reason", lambda name: None)
     await graph.ainvoke(_inputs("order dosa"), CFG)
     swiggy_prompt = fake.calls[1][0].content
-    assert "temporarily unavailable" not in swiggy_prompt
+    assert "not connected yet" not in swiggy_prompt
 
 
 async def test_instamart_to_tracker_after_order(make_graph):
