@@ -16,6 +16,7 @@ import { useThreads } from "../../hooks/useThreads";
 import { ThreadSidebar } from "../sidebar/ThreadSidebar";
 import { MessageBubble, type ChatMessage } from "./MessageBubble";
 import { AgentDock } from "./AgentDock";
+import { ThreadIdChip } from "./ThreadIdChip";
 import { InterruptCard } from "./InterruptCard";
 import { PlanCard } from "./PlanCard";
 import { Composer } from "./Composer";
@@ -427,6 +428,7 @@ export function ChatView() {
               {alwaysSpeak ? "ON" : "OFF"}
             </button>
           </div>
+          <ThreadIdChip threadId={threadId} />
           <WakeWordIndicator />
           <VoiceWaveform />
           <ThemeToggle />

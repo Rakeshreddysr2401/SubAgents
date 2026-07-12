@@ -152,6 +152,24 @@
   box-shadow: 0 0 16px rgba(34, 211, 238, 0.25);
 }
 
+/* Copyable conversation-id chip (LangSmith trace lookup) */
+.thread-id-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 20px;
+  background: var(--header-chip);
+  border: 1px solid var(--header-chip-border);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 600;
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease);
+}
+.thread-id-chip:hover { color: var(--primary); border-color: var(--primary); }
+.thread-id-chip svg { width: 12px; height: 12px; }
+.thread-id-chip.copied { color: var(--green); border-color: var(--green); }
+
 /* Wake-word indicator */
 .wake-word-indicator { text-transform: none; }
 .wake-word-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
@@ -291,6 +309,8 @@
 }
 .thread-item:hover .thread-delete { opacity: 1; }
 .thread-item .thread-delete:hover { background: var(--danger-light); color: var(--danger-strong); }
+.thread-item .thread-delete.thread-neutral:hover { background: var(--primary-light); color: var(--primary); }
+.thread-item .thread-delete.copied { opacity: 1; color: var(--green); background: none; }
 .thread-item .thread-delete svg { width: 13px; height: 13px; }
 .thread-empty { font-size: 11.5px; color: var(--text-muted); text-align: center; padding: 20px 8px; }
 

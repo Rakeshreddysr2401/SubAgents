@@ -26,6 +26,22 @@ export function ThreadSidebar({ threads, activeThreadId, open = true, onSelect, 
     setEditingId(null);
   };
 
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copyId = async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(id);
+    } catch {
+      const el = document.createElement("input");
+      el.value = id;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    }
+    setCopiedId(id);
+    setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 1400);
+  };
+
   return (
     <div className={`history-sidebar${open ? "" : " closed"}`}>
       <button className="new-chat-btn" onClick={onNewThread} type="button">
@@ -64,7 +80,24 @@ export function ThreadSidebar({ threads, activeThreadId, open = true, onSelect, 
               <span className="thread-title">{t.title}</span>
             )}
             <button
-              className="thread-delete"
+              className={`thread-delete thread-neutral${copiedId === t.id ? " copied" : ""}`}
+              onClick={(e) => { e.stopPropagation(); copyId(t.id); }}
+              title="Copy conversation id (for LangSmith / logs)"
+              type="button"
+            >
+              {copiedId === t.id ? (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              )}
+            </button>
+            <button
+              className="thread-delete thread-neutral"
               onClick={(e) => { e.stopPropagation(); startEdit(t); }}
               title="Rename"
               type="button"
