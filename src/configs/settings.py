@@ -148,7 +148,12 @@ class Settings(BaseSettings):
     summarization_trigger_tokens: int = Field(6000, alias="SUMMARIZATION_TRIGGER_TOKENS")
     summarization_keep_messages: int = Field(20, alias="SUMMARIZATION_KEEP_MESSAGES")
     frame_ttl_seconds: int = Field(120, alias="FRAME_TTL_SECONDS")
-    chat_timeout_seconds: int = Field(120, alias="CHAT_TIMEOUT_SECONDS")
+    # Whole-turn budget. Multi-step flows (ordering: get address → search →
+    # present options) on a local model do several LLM+tool round-trips, so
+    # 120s is too tight — a self-hosted 12B easily needs more. Agents should
+    # still break long flows up by asking via ask_user_choice (which
+    # interrupts and ends the turn early).
+    chat_timeout_seconds: int = Field(300, alias="CHAT_TIMEOUT_SECONDS")
     rate_limit_per_minute: int = Field(20, alias="RATE_LIMIT_PER_MINUTE")
     # Higher ceiling for cheap CRUD (threads/reminders/shopping/music/guardian)
     # — the chat limit above stays the tight one.

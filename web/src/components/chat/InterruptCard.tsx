@@ -10,7 +10,11 @@ import "./ActivityCards.css";
  * tools work day one and can be upgraded to rich cards later. */
 const RICH_COMPONENTS: Record<string, ComponentType<InterruptItemProps>> = {
   ask_user_choice: ChoiceCard,
+  // The real spend/commit steps on Swiggy's live MCP servers, plus the
+  // generic confirm — all get the amount-forward order card.
   confirm_order: OrderConfirmCard,
+  place_food_order: OrderConfirmCard,
+  checkout: OrderConfirmCard,
 };
 
 interface InterruptCardProps {

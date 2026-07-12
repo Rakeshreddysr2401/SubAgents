@@ -39,7 +39,11 @@ def _tool_call(name: str, args: dict[str, Any], call_id: str = "call_1") -> AIMe
 
 
 @pytest.fixture(autouse=True)
-def fresh_mcp_state():
+def fresh_mcp_state(monkeypatch, tmp_path):
+    # Isolate from any real ~/.subagents/mcp_tokens.json so "provider down"
+    # means genuinely not-connected, not the developer's live token.
+    monkeypatch.setenv("SUBAGENTS_MCP_TOKENS", str(tmp_path / "mcp_tokens.json"))
+    monkeypatch.delenv("SWIGGY_ACCESS_TOKEN", raising=False)
     mcp.reset_state()
     yield
     mcp.reset_state()
