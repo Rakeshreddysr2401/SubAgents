@@ -106,6 +106,13 @@ export function ChatView() {
   const togglePanels = () => setPanelsOpen((v) => (storeOpen("ui-panels-rail", !v), !v));
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  // "Pinned to bottom" = the user is reading the latest reply, so we follow
+  // the stream down. If they scroll up to read history, we stop yanking them.
+  // A fast reply used to leave the view parked on the previous answer because
+  // the old `scrollTop = scrollHeight` fired before layout settled; anchoring
+  // to a sentinel that we scroll into view fixes that.
+  const pinnedRef = useRef(true);
+  const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadThreads();
@@ -136,20 +143,36 @@ export function ChatView() {
     return () => clearTimeout(t);
   }, [error]);
 
-  const scrollToBottom = useCallback(() => {
-    requestAnimationFrame(() => {
-      const el = chatContainerRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
-    });
+  // Track whether the user is at the bottom (within 120px). Updated on their
+  // manual scrolls; drives whether streaming auto-follows.
+  const onScroll = useCallback(() => {
+    const el = chatContainerRef.current;
+    if (!el) return;
+    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
   }, []);
 
-  useEffect(scrollToBottom, [messages, scrollToBottom]);
+  const followBottom = useCallback(() => {
+    if (!pinnedRef.current) return;
+    // Two rAFs: let the just-rendered markdown/bubble lay out before we
+    // measure, so a fast short reply still lands the view on itself.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => endRef.current?.scrollIntoView({ block: "end" })),
+    );
+  }, []);
+
+  const forceBottom = useCallback(() => {
+    pinnedRef.current = true;
+    followBottom();
+  }, [followBottom]);
+
+  useEffect(followBottom, [messages, followBottom]);
 
   const startNewThread = useCallback(() => {
     setThreadId(newId());
     setMessages([]);
     setTodos([]);
     setRewind(null);
+    pinnedRef.current = true;  // fresh thread starts at the bottom
   }, [setTodos]);
 
   const selectThread = useCallback(async (id: string) => {
@@ -168,6 +191,7 @@ export function ChatView() {
       );
       setTodos([]);
       setRewind(null);
+      pinnedRef.current = true;  // show the loaded conversation's latest message
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -192,6 +216,14 @@ export function ChatView() {
         if (event.thread_id && event.thread_id !== threadId) {
           setThreadId(event.thread_id);
         }
+        // Always clear the thinking state on completion — a turn that ended
+        // with no text delta (pure tool/handoff) would otherwise hang on
+        // "Thinking" forever.
+        setMessages((prev) =>
+          prev.map((m) => (m.id === botId && m.thinking
+            ? { ...m, thinking: false, content: m.content || "Done." }
+            : m)),
+        );
         // Voice mode: the browser speaks the finished reply (speechSynthesis).
         if (alwaysSpeak && fullText) speak(fullText);
         continue;
@@ -264,6 +296,8 @@ export function ChatView() {
     setMessages((prev) => [...prev, { id: newId(), role: "user", content: query }]);
     const botId = newId();
     setMessages((prev) => [...prev, { id: botId, role: "bot", content: "", thinking: true }]);
+    // Sending my own message always snaps the view to the bottom.
+    forceBottom();
 
     try {
       // Location is best-effort: null on deny/timeout, cached 5 min.
@@ -285,7 +319,7 @@ export function ChatView() {
       setError(message);
       setSending(false);
     }
-  }, [threadId, alwaysSpeak, loadThreads, resetTurn, consumeIntoMessage, rewind]);
+  }, [threadId, alwaysSpeak, loadThreads, resetTurn, consumeIntoMessage, rewind, forceBottom]);
 
   /** "Edit & resend from here": find the turn-boundary checkpoint BEFORE the
    * k-th user message and stage a fork. Boundaries come back newest-first,
@@ -450,7 +484,7 @@ export function ChatView() {
         </div>
 
         <div className="right-panel">
-          <div className="chat-container" ref={chatContainerRef}>
+          <div className="chat-container" ref={chatContainerRef} onScroll={onScroll}>
             {messages.length === 0 ? (
               <div className="welcome">
                 <div className="welcome-icon">
@@ -485,6 +519,8 @@ export function ChatView() {
                 resolving={resolvingInterrupt}
               />
             )}
+            {/* Scroll anchor: the view follows this into view while pinned. */}
+            <div ref={endRef} aria-hidden style={{ height: 1 }} />
           </div>
           <Composer
             onSend={sendMessage}
