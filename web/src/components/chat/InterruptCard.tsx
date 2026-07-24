@@ -3,6 +3,7 @@ import type { ActionRequest, ResumeDecision } from "../../api/types";
 import { ChoiceCard } from "./interrupts/ChoiceCard";
 import { OrderConfirmCard } from "./interrupts/OrderConfirmCard";
 import type { InterruptItemProps } from "./interrupts/types";
+import { friendlyToolName } from "../../utils/toolNames";
 import "./ActivityCards.css";
 
 /** Component registry: the interrupt's action name is the component id.
@@ -21,10 +22,6 @@ interface InterruptCardProps {
   actionRequests: ActionRequest[];
   onResolve: (decisions: ResumeDecision[]) => void;
   resolving: boolean;
-}
-
-function friendlyToolName(name: string): string {
-  return name.replace(/_/g, " ");
 }
 
 /** The unregistered-tool fallback: raw args + approve/edit/reject. */

@@ -10,7 +10,7 @@ import type {
   ThreadMessagesResponse,
   Todo,
 } from "../../api/types";
-import { useAuth } from "../../state/AuthContext";
+import { useAuth } from "../../state/auth";
 import { useChatStream } from "../../state/chatStream";
 import { useThreads } from "../../hooks/useThreads";
 import { ThreadSidebar } from "../sidebar/ThreadSidebar";

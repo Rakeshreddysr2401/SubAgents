@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { parseJsonError } from "../../api/client";
-import { useAuth } from "../../state/AuthContext";
+import { useAuth } from "../../state/auth";
 import "./Auth.css";
 
 type Mode = "login" | "signup";

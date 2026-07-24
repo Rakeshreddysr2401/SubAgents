@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { addCopyButtons, renderMarkdown } from "../../utils/markdown";
-import { ActivityTrail, friendlyToolName } from "./ToolActivityCard";
+import { ActivityTrail } from "./ToolActivityCard";
+import { friendlyToolName } from "../../utils/toolNames";
 import type { ToolActivityItem } from "../../state/chatStream";
 import "./Messages.css";
 

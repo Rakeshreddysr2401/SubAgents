@@ -1,10 +1,7 @@
 import { useState } from "react";
 import type { ToolActivityItem } from "../../state/chatStream";
+import { friendlyToolName } from "../../utils/toolNames";
 import "./ActivityCards.css";
-
-export function friendlyToolName(name: string): string {
-  return name.replace(/_/g, " ");
-}
 
 /** Collapsed one-line trail of the steps a reply took ("✓ 2 steps"),
  * expandable on tap. Lives INSIDE the message bubble — no extra cards, no
